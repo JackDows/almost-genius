@@ -27,7 +27,7 @@ foreach ($taskRoot in ($taskRoots | Select-Object -Unique)) {
         ($_.Name -eq 'powershell.exe' -and $_.CommandLine -and $_.CommandLine.Contains('"'+(Join-Path $taskResolved 'Run-Background.ps1')+'"'))
     } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     $taskRunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-    $taskRun = Get-ItemPropertyValue -LiteralPath $taskRunKey -Name 'Aonor-Jira-Reminder' -ErrorAction SilentlyContinue
+    $taskRun = (Get-ItemProperty -LiteralPath $taskRunKey -ErrorAction SilentlyContinue).'Aonor-Jira-Reminder'
     if ($taskRun -and $taskRun.Contains('"'+(Join-Path $taskResolved 'Run-Background.ps1')+'"')) { Remove-ItemProperty -LiteralPath $taskRunKey -Name 'Aonor-Jira-Reminder' }
     $taskData = if (Test-Path -LiteralPath (Join-Path $taskResolved 'installed.json')) { Join-Path $env:LOCALAPPDATA 'JiraWorkReminder' } else { Join-Path $taskResolved '.local' }
     $taskRuntimeFile = Join-Path $taskData 'runtime.json'
