@@ -1,5 +1,6 @@
 ﻿param([string]$Compiler)
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 $taskRoot = Split-Path $PSScriptRoot -Parent
 $taskVendor = Join-Path $PSScriptRoot 'vendor'
 $taskStage = Join-Path $PSScriptRoot 'stage'
@@ -8,7 +9,8 @@ New-Item -ItemType Directory -Path $taskVendor -Force | Out-Null
 function Get-VerifiedFile([string]$Url, [string]$Destination, [string]$Hash) {
     if ((Test-Path -LiteralPath $Destination) -and (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash -eq $Hash) { return }
     $taskDownload = $Destination + '.download'
-    Invoke-WebRequest -Uri $Url -OutFile $taskDownload -UseBasicParsing
+    Write-Output ('下载：'+[IO.Path]::GetFileName($Destination))
+    Invoke-WebRequest -Uri $Url -OutFile $taskDownload -UseBasicParsing -TimeoutSec 180
     if ((Get-FileHash -LiteralPath $taskDownload -Algorithm SHA256).Hash -ne $Hash) { throw ('下载校验失败：'+$Url) }
     Move-Item -LiteralPath $taskDownload -Destination $Destination -Force
 }

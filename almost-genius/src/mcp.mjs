@@ -14,7 +14,7 @@ input.on('line', async line => {
   try {
     request = JSON.parse(line); if (request.id === undefined) return;
     let result;
-    if (request.method === 'initialize') result = { protocolVersion: request.params?.protocolVersion || '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'almost-genius', version: '0.4.1' } };
+    if (request.method === 'initialize') result = { protocolVersion: request.params?.protocolVersion || '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'almost-genius', version: '0.4.2' } };
     else if (request.method === 'ping') result = {};
     else if (['tools/list', 'tools/call'].includes(request.method)) result = await remote(request.method, request.params);
     else { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Unknown method' } }) + '\n'); return; }
