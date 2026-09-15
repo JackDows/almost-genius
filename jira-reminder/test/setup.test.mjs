@@ -165,7 +165,7 @@ test('Windows DPAPI 可以往返保护中文及特殊字符，密文不包含原
 test('系统 Windows PowerShell 可解析全部中文启动脚本', { skip: process.platform !== 'win32' }, async () => {
   const executable = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const directory = fileURLToPath(new URL('..', import.meta.url));
-  const script = 'foreach($file in @("Start.ps1","Run-Background.ps1","Install-Autostart.ps1","Remove-Autostart.ps1","desktop/Build.ps1","desktop/Install-Desktop.ps1")) { $tokens=$null; $problems=$null; [System.Management.Automation.Language.Parser]::ParseFile((Join-Path (Get-Location) $file),[ref]$tokens,[ref]$problems) | Out-Null; if($problems.Count -gt 0) { exit 1 } }';
+  const script = 'foreach($file in @("Paths.ps1","Start.ps1","Run-Background.ps1","Install-Autostart.ps1","Remove-Autostart.ps1","desktop/Build.ps1","desktop/Install-Desktop.ps1","packaging/Build-Release.ps1","packaging/Prepare-Install.ps1")) { $tokens=$null; $problems=$null; [System.Management.Automation.Language.Parser]::ParseFile((Join-Path (Get-Location) $file),[ref]$tokens,[ref]$problems) | Out-Null; if($problems.Count -gt 0) { exit 1 } }';
   await promisify(execFile)(executable, ['-NoProfile', '-NonInteractive', '-Command', script], { cwd: directory, windowsHide: true, timeout: 15000 });
 });
 

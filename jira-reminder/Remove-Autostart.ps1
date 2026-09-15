@@ -7,4 +7,7 @@ if ($taskExisting) {
     Stop-ScheduledTask -TaskName $taskName
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
 }
-Write-Output '已移除登录自动启动。当前提醒开关可在本机网页暂停。'
+$taskRunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$taskRun = Get-ItemPropertyValue -LiteralPath $taskRunKey -Name $taskName -ErrorAction SilentlyContinue
+if ($taskRun -and $taskRun.Contains('"'+$taskScript+'"')) { Remove-ItemProperty -LiteralPath $taskRunKey -Name $taskName }
+Write-Output '已移除登录自动启动。可从托盘退出并暂停提醒。'

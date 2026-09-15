@@ -1,5 +1,6 @@
 ﻿$ErrorActionPreference = 'Stop'
-$taskLocal = Join-Path $PSScriptRoot '.local'
+. (Join-Path $PSScriptRoot 'Paths.ps1')
+$taskLocal = $taskDataRoot
 $taskRuntimePath = Join-Path $taskLocal 'runtime.json'
 if (Test-Path -LiteralPath $taskRuntimePath) {
     try {
@@ -14,7 +15,8 @@ if (Test-Path -LiteralPath $taskRuntimePath) {
         }
     } catch {}
 }
-$taskNode = (Get-Command node.exe).Source
+$taskNode = Join-Path $PSScriptRoot 'runtime\node\node.exe'
+if (-not (Test-Path -LiteralPath $taskNode)) { $taskNode = (Get-Command node.exe).Source }
 New-Item -ItemType Directory -Path $taskLocal -Force | Out-Null
 $taskProcess = Start-Process -FilePath $taskNode -ArgumentList @('src/server.mjs') -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $taskLocal 'stdout.log') -RedirectStandardError (Join-Path $taskLocal 'stderr.log')
 for ($taskAttempt = 0; $taskAttempt -lt 40; $taskAttempt++) {

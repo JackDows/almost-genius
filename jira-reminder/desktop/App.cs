@@ -17,11 +17,12 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: AssemblyTitle("Jira 工作提醒")]
 [assembly: AssemblyProduct("Jira 工作提醒")]
-[assembly: AssemblyVersion("0.2.0.0")]
+[assembly: AssemblyVersion("0.3.0.0")]
 
 internal static class Program
 {
     internal static readonly string Root = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", ".."));
+    internal static readonly string Data = !String.IsNullOrEmpty(Environment.GetEnvironmentVariable("JIRA_REMINDER_DATA")) ? Path.GetFullPath(Environment.GetEnvironmentVariable("JIRA_REMINDER_DATA")) : File.Exists(Path.Combine(Root, "installed.json")) ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "JiraWorkReminder") : Path.Combine(Root, ".local");
     internal const string Home = "http://127.0.0.1:60500/";
 
     [STAThread]
@@ -51,7 +52,7 @@ internal sealed class ServiceClient : IDisposable
     // 校验本程序的运行实例，端口被别的进程占用时不加载其页面。
     private async Task Authenticate()
     {
-        var saved = json.Deserialize<Dictionary<string, object>>(File.ReadAllText(Path.Combine(Program.Root, ".local", "runtime.json")));
+        var saved = json.Deserialize<Dictionary<string, object>>(File.ReadAllText(Path.Combine(Program.Data, "runtime.json")));
         var health = json.Deserialize<Dictionary<string, object>>(await client.GetStringAsync(Program.Home + "health"));
         if (Convert.ToString(saved["url"]) != Program.Home || Convert.ToString(health["app"]) != "aonor-jira-reminder-setup" ||
             Convert.ToString(saved["instance"]) != Convert.ToString(health["instance"])) throw new InvalidOperationException();
@@ -81,6 +82,8 @@ internal sealed class ServiceClient : IDisposable
 
     internal void StartService()
     {
+        var stopped = Path.Combine(Program.Data, "stopped");
+        if (File.Exists(stopped)) File.Delete(stopped);
         var shell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
         Process.Start(new ProcessStartInfo(shell, "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + Path.Combine(Program.Root, "Start.ps1") + "\"")
         { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden, WorkingDirectory = Program.Root });
@@ -166,6 +169,7 @@ internal sealed class ReminderContext : ApplicationContext
         }
         catch
         {
+            if (exiting) return;
             statusItem.Text = "后台未连接 · 正在恢复";
             tray.Text = "Jira 工作提醒 · 后台未连接";
             tray.Icon = amber;
@@ -184,8 +188,10 @@ internal sealed class ReminderContext : ApplicationContext
 
     private async Task ExitAndPause()
     {
-        try { await service.Request("api/work/enable", new { enabled = false }); }
-        catch { tray.ShowBalloonTip(5000, "暂时无法暂停", "后台未连接，恢复后可再次退出。", ToolTipIcon.Warning); return; }
+        if (exiting) return;
+        exiting = true;
+        try { await service.Request("api/work/enable", new { enabled = false }); await service.Request("api/app/stop", new { }); }
+        catch { exiting = false; tray.ShowBalloonTip(5000, "暂时无法暂停", "后台未连接，恢复后可再次退出。", ToolTipIcon.Warning); return; }
         exiting = true;
         if (window != null) { window.AllowClose = true; window.Close(); }
         ExitThread();
@@ -253,7 +259,7 @@ internal sealed class ReminderWindow : Form
             await service.Request("api/status");
             if (web.CoreWebView2 == null)
             {
-                var environment = await CoreWebView2Environment.CreateAsync(null, Path.Combine(Program.Root, ".local", "webview"));
+                var environment = await CoreWebView2Environment.CreateAsync(null, Path.Combine(Program.Data, "webview"));
                 await web.EnsureCoreWebView2Async(environment);
                 web.CoreWebView2.Settings.AreDevToolsEnabled = false;
                 web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
@@ -261,10 +267,17 @@ internal sealed class ReminderWindow : Form
                 web.CoreWebView2.Settings.IsGeneralAutofillEnabled = false;
                 web.CoreWebView2.Settings.IsWebMessageEnabled = false;
                 web.CoreWebView2.PermissionRequested += (sender, e) => { e.State = CoreWebView2PermissionState.Deny; };
-                web.CoreWebView2.DownloadStarting += (sender, e) => { e.Cancel = true; };
+                web.CoreWebView2.DownloadStarting += (sender, e) =>
+                {
+                    e.Cancel = true;
+                    if (!e.DownloadOperation.Uri.StartsWith("blob:" + Program.Home, StringComparison.Ordinal)) return;
+                    using (var dialog = new SaveFileDialog { Filter = "加密备份 (*.jwrbackup)|*.jwrbackup", FileName = "工作提醒-" + DateTime.Now.ToString("yyyyMMdd") + ".jwrbackup", AddExtension = true, DefaultExt = "jwrbackup" })
+                    { if (dialog.ShowDialog(this) == DialogResult.OK) { e.ResultFilePath = dialog.FileName; e.Cancel = false; e.Handled = true; } }
+                };
                 web.CoreWebView2.NewWindowRequested += (sender, e) => { e.Handled = true; OpenJira(e.Uri); };
                 web.CoreWebView2.NavigationStarting += (sender, e) =>
                 {
+                    if (e.Uri.StartsWith("blob:" + Program.Home, StringComparison.Ordinal)) return;
                     Uri uri;
                     if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out uri) || uri.GetLeftPart(UriPartial.Path) != Program.Home)
                     { e.Cancel = true; OpenJira(e.Uri); }

@@ -9,6 +9,7 @@ let kind = 'daily';
 let toastTimer;
 let lastNotes = '';
 let lastIssues = '';
+let historyEntries = [], historyStamp = null, historyLoading = false;
 const names = { not_configured:'未配置', connecting:'连接中', connected:'已连接', disconnected:'已断开', reconnecting:'重连中', error:'连接异常' };
 
 function feedback(text, error = false) {
@@ -41,25 +42,35 @@ function time(value, withDate = false) {
 }
 
 function openPage(page) {
-  if (!['today','records','settings'].includes(page)) return;
+  if (!['today','records','history','settings'].includes(page)) return;
   for (const element of document.querySelectorAll('.page')) element.hidden = element.id !== 'page-' + page;
   for (const button of document.querySelectorAll('.nav')) {
     const selected = button.dataset.page === page;
     button.classList.toggle('active', selected);
     if (selected) button.setAttribute('aria-current','page'); else button.removeAttribute('aria-current');
   }
-  $('breadcrumb').textContent = '工作台 / ' + {today:'今日工作',records:'记录与整理',settings:'设置'}[page];
+  $('breadcrumb').textContent = '工作台 / ' + {today:'今日工作',records:'记录与整理',history:'工作历史',settings:'设置'}[page];
+  if (page === 'history') void loadHistory();
   window.scrollTo({ top:0 });
 }
 
 function empty(parent, text) { const p = document.createElement('p'); p.className = 'empty'; p.textContent = text; parent.append(p); }
 function updateResult() {
   const day = status?.work?.today;
-  const text = kind === 'daily' ? day?.summary : day?.weekly;
-  $('result-title').textContent = kind === 'daily' ? '填报参考' : '待核对草稿';
-  $('result-count').textContent = kind === 'daily' ? (text ? [...text].length + ' 字' : '≤ 50 字') : '一起核对';
+  const text = kind === 'daily' ? day?.summary : kind === 'weekly' ? day?.weekly : day?.chat;
+  $('result-title').textContent = kind === 'daily' ? '填报参考' : kind === 'weekly' ? '待核对草稿' : 'Codex 回复';
+  $('result-count').textContent = kind === 'daily' ? (text ? [...text].length + ' 字' : '≤ 50 字') : kind === 'weekly' ? '一起核对' : '连续对话';
   $('result-text').textContent = text || '整理结果会显示在这里。';
   $('result-hint').textContent = kind === 'daily' ? '填报完成后，回复“已填报”或点击“今日已完成”。' : '有遗漏或计划变化，继续补充内容即可。';
+  $('conversation').replaceChildren();
+  const turns = day?.conversations?.[kind] || [];
+  if (!turns.length) empty($('conversation'), '发送第一条消息开始对话。');
+  for (const turn of turns.slice(-40)) {
+    const row = document.createElement('div'); row.className = 'note-row';
+    const label = document.createElement('strong'); label.textContent = turn.role === 'user' ? '你' : 'Codex';
+    const content = document.createElement('p'); content.textContent = turn.text;
+    row.append(label, content); $('conversation').append(row);
+  }
 }
 
 function renderIssues() {
@@ -86,6 +97,16 @@ function renderIssues() {
 
 function render() {
   const work = status.work, day = work.today;
+  const history = status.history || {};
+  $('history-sync').disabled = working || history.busy || !status.jira?.configured;
+  $('history-status').textContent = history.busy ? '正在同步：' + history.progress : history.notice || (history.syncedAt ? `${history.from} 至 ${history.to} · ${history.count} 条记录 · 最近同步 ${time(history.syncedAt,true)}` : '尚未加载。配置 Jira 后会自动载入，也可以点击同步。');
+  if (!$('page-history').hidden && history.syncedAt !== historyStamp) void loadHistory();
+  $('welcome').hidden = Boolean(status.hasCredentials || status.jira?.configured);
+  $('codex-state').textContent = {logged_in:'已登录', logged_out:'未登录', logging_in:'登录中', missing:'组件缺失', checking:'检查中'}[status.codex?.state] || '待检查';
+  $('codex-message').textContent = status.codex?.message || '';
+  $('codex-login').disabled = working || status.codex?.state === 'logging_in';
+  $('codex-cancel').hidden = status.codex?.state !== 'logging_in';
+  if (status.backupPending) $('backup-state').textContent = '备份已验证，后台正在重新启动。';
   const runtime = runtimeView(status);
   $('runtime-text').textContent = runtime.text; $('runtime-dot').className = 'dot ' + runtime.color;
   $('settings-runtime').textContent = runtime.text;
@@ -93,7 +114,7 @@ function render() {
   $('weekday').textContent = new Date(status.serverTime).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai',weekday:'long'});
   $('today-caption').textContent = '填报、临期任务和下一次提醒，都在这里。';
   $('service-banner').hidden = !work.notice && status.connection === 'connected';
-  $('service-banner').textContent = work.notice || '企业微信暂未连接，正在自动恢复。本机记录仍可使用。';
+  $('service-banner').textContent = work.notice || (status.hasCredentials ? '企业微信暂未连接，正在自动恢复。本机记录仍可使用。' : '首次使用请在设置中连接 Jira 和企业微信；也可以先记录工作内容。');
   $('completion-title').textContent = day.completed ? '今日工时已填报' : '今日工时待填报';
   $('completion-help').textContent = day.completed ? '已保存完成标记，今晚不再提醒填报。' : '填好 Jira 工时后，点击右侧按钮确认。';
   $('complete').disabled = day.completed || working;
@@ -172,8 +193,8 @@ document.querySelectorAll('[data-open]').forEach(button => button.addEventListen
 document.querySelectorAll('[data-kind]').forEach(button => button.addEventListener('click', () => {
   kind = button.dataset.kind;
   document.querySelectorAll('[data-kind]').forEach(item => item.classList.toggle('selected',item.dataset.kind === kind));
-  $('note-label').textContent = kind === 'daily' ? '今天做了什么？' : '本周做了什么，下周准备做什么？';
-  $('note-hint').textContent = kind === 'daily' ? '整理为 50 字以内，生成文字后仍需自行填报。' : '先整理草稿，再一起核对。';
+  $('note-label').textContent = kind === 'daily' ? '今天做了什么？也可以继续修改草稿。' : kind === 'weekly' ? '本周做了什么，下周准备做什么？' : '想问什么？';
+  $('note-hint').textContent = kind === 'daily' ? '整理为 50 字以内，生成文字后仍需自行填报。' : kind === 'weekly' ? '先整理草稿，再一起核对。' : '直接与 Codex 对话，不执行外部操作。';
   updateResult();
 }));
 $('complete').addEventListener('click', () => action('/api/work/complete'));
@@ -187,3 +208,53 @@ $('note-form').addEventListener('submit', async event => { event.preventDefault(
 $('jira-form').addEventListener('submit', async event => { event.preventDefault(); if (await action('/api/jira/connect',{username:$('jira-user').value,password:$('jira-password').value})) { $('jira-password').value = ''; $('jira-details').open = false; } });
 $('config-form').addEventListener('submit', async event => { event.preventDefault(); if (await action('/api/connect',{botId:$('bot-id').value,secret:$('secret').value})) $('secret').value = ''; });
 refresh(); setInterval(refresh,5000);
+
+$('codex-login').addEventListener('click', () => action('/api/codex/login'));
+$('codex-check').addEventListener('click', () => action('/api/codex/check'));
+$('codex-cancel').addEventListener('click', () => action('/api/codex/cancel'));
+$('welcome-import').addEventListener('click', () => { openPage('settings'); $('import-details').open = true; $('backup-card').scrollIntoView(); });
+$('backup-export').addEventListener('submit', async event => {
+  event.preventDefault(); if (working) return;
+  if ($('export-password').value !== $('export-confirm').value) return feedback('两次输入的密码不一致。', true);
+  working = true;
+  try {
+    const result = await request('/api/backup/export', {password:$('export-password').value});
+    const url = URL.createObjectURL(new Blob([result.file], {type:'application/octet-stream'}));
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = `工作提醒-${status.work.date}.jwrbackup`;
+    document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url),60000);
+    $('export-password').value = $('export-confirm').value = '';
+    feedback('加密备份已生成，请在保存窗口选择位置。');
+  } catch (error) { feedback(error.message, true); } finally { working = false; }
+});
+$('backup-import').addEventListener('submit', async event => {
+  event.preventDefault(); if (working) return;
+  const file = $('import-file').files[0];
+  if (!file || file.size > 32 * 1024 * 1024) return feedback('请选择不超过 32 MB 的备份文件。',true);
+  if (await action('/api/backup/import', {file:await file.text(), password:$('import-password').value, confirmed:$('import-confirm').checked})) {
+    $('import-password').value = ''; $('import-file').value = ''; $('import-confirm').checked = false;
+    $('backup-state').textContent = '导入已准备完成。后台恢复后，请检查连接并启用提醒。';
+  }
+});
+
+async function loadHistory() {
+  if (historyLoading) return; historyLoading=true;
+  try { const result=await request('/api/history'); historyEntries=result.entries; historyStamp=status?.history?.syncedAt; renderHistory(); }
+  catch (error) { feedback(error.message,true); } finally { historyLoading=false; }
+}
+function renderHistory() {
+  const needle=$('history-filter').value.trim().toLowerCase();
+  const entries=historyEntries.filter(item=>`${item.date} ${item.issueKey || ''} ${item.title} ${item.text}`.toLowerCase().includes(needle));
+  $('history-list').replaceChildren();
+  if (!entries.length) return empty($('history-list'),needle ? '没有匹配的记录。' : '还没有已同步的记录。');
+  for (const item of entries) {
+    const row=document.createElement('div'); row.className='note-row';
+    const date=document.createElement('strong'); date.textContent=item.date;
+    const stamp=document.createElement('time'); stamp.textContent=` · ${item.source} · ${Number.isFinite(item.timeSpentSeconds) ? Math.round(item.timeSpentSeconds/3600*100)/100+' 小时' : ''}`;
+    const link=document.createElement('a'); link.textContent=`${item.issueKey || ''} ${item.title}`; link.target='_blank'; link.rel='noreferrer';
+    try { const url=new URL(item.url); if(url.protocol==='https:' && !url.username && !url.password) link.href=url.href; } catch {}
+    const text=document.createElement('p'); text.textContent=item.text || '（未填写工作描述）';
+    const heading=document.createElement('div'); heading.append(link); row.append(date,stamp,heading,text); $('history-list').append(row);
+  }
+}
+$('history-filter').addEventListener('input',renderHistory);
+$('history-sync').addEventListener('click',()=>action('/api/history/sync'));

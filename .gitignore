@@ -1,0 +1,6 @@
+# 个人配置与备份不进入仓库。
+.local/
+*.dpapi
+*.jwrbackup
+auth.json
+*.log

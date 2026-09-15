@@ -1,0 +1,1 @@
+﻿$taskDataRoot = if ($env:JIRA_REMINDER_DATA) { [IO.Path]::GetFullPath($env:JIRA_REMINDER_DATA) } elseif (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'installed.json')) { Join-Path $env:LOCALAPPDATA 'JiraWorkReminder' } else { Join-Path $PSScriptRoot '.local' }

@@ -4,3 +4,11 @@ node_modules/
 *.log
 desktop/vendor/
 desktop/bin/
+packaging/vendor/
+packaging/stage/
+packaging/smoke-install/
+runtime/
+dist/
+*.jwrbackup
+*.dpapi
+auth.json

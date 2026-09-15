@@ -7,7 +7,10 @@ import { CredentialStore, StateStore } from './store.mjs';
 import { WecomSetup } from './wecom.mjs';
 import { JiraClient, JiraError } from './jira.mjs';
 import { WorkService, WorkError } from './work.mjs';
-import { CodexWriter } from './codex.mjs';
+import { CodexWriter, CodexAuth } from './codex.mjs';
+import { BackupService, BackupError, MAX_BACKUP, dataDirectory } from './backup.mjs';
+import { localRoot } from './paths.mjs';
+import { HistoryService } from './history.mjs';
 import { Scheduler } from './scheduler.mjs';
 import { notifyLocal, isOnline } from './notifications.mjs';
 
@@ -18,13 +21,13 @@ function send(res, status, value, type = 'application/json; charset=utf-8') {
   res.end(type.startsWith('application/json') ? JSON.stringify(value) : value);
 }
 
-async function readJson(req) {
+async function readJson(req, limit = 16384) {
   if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') throw new Error('需要 JSON 请求。');
   const data = await new Promise((resolve, reject) => {
     let size = 0;
     const parts = [];
-    req.on('data', chunk => { size += chunk.length; if (size <= 16384) parts.push(chunk); });
-    req.on('end', () => size > 16384 ? reject(new Error('请求过长。')) : resolve(Buffer.concat(parts)));
+    req.on('data', chunk => { size += chunk.length; if (size <= limit) parts.push(chunk); });
+    req.on('end', () => size > limit ? reject(new Error('请求过长。')) : resolve(Buffer.concat(parts)));
     req.on('error', () => reject(new Error('请求中断。')));
   });
   let body;
@@ -63,14 +66,34 @@ export function createSetupServer(setup, template, services = {}) {
         !timingSafeEqual(Buffer.from(receivedToken), Buffer.from(token))) {
       return send(res, 403, { error: '配置页已过期，请刷新页面。' });
     }
-    if (req.method === 'GET' && req.url === '/api/status') return send(res, 200, { ...setup.status(), serverTime: new Date().toISOString(), remindersEnabled: services.work?.status().enabled || false, jira: services.jira?.status(), work: services.work?.status() });
-    if (req.method !== 'POST' || !['/api/connect', '/api/test-push', '/api/jira/connect', '/api/jira/check', '/api/work/complete', '/api/work/reopen', '/api/work/record', '/api/work/retry', '/api/work/enable', '/api/work/test-local'].includes(req.url)) {
+    if (req.method === 'GET' && req.url === '/api/status') return send(res, 200, { ...setup.status(), version: '0.3.0', history: services.history?.status(), codex: services.auth?.status(), backupPending: services.backup?.pending, serverTime: new Date().toISOString(), remindersEnabled: services.work?.status().enabled || false, jira: services.jira?.status(), work: services.work?.status() });
+    if (req.method === 'GET' && req.url === '/api/history' && services.history) return send(res,200,{entries:services.history.list()});
+    if (req.method !== 'POST' || !['/api/history/sync', '/api/codex/login', '/api/codex/check', '/api/codex/cancel', '/api/backup/export', '/api/backup/import', '/api/app/restart', '/api/app/stop', '/api/connect', '/api/test-push', '/api/jira/connect', '/api/jira/check', '/api/work/complete', '/api/work/reopen', '/api/work/record', '/api/work/retry', '/api/work/enable', '/api/work/test-local'].includes(req.url)) {
       return send(res, 404, { error: '操作不存在。' });
     }
     if (mutationActive) return send(res, 409, { error: '正在处理，请稍后。' });
     mutationActive = true;
     try {
-      const body = await readJson(req);
+      const body = await readJson(req, req.url === '/api/backup/import' ? MAX_BACKUP + 1000000 : 16384);
+      if (services.backup?.pending && req.url !== '/api/app/restart') throw new BackupError('备份已就绪，后台正在重启，请稍候。');
+      if (req.url === '/api/history/sync' && services.history) return send(res,200,{message:services.history.start()});
+      if (req.url.startsWith('/api/codex/') && services.auth) {
+        const method = req.url.split('/').at(-1);
+        const result = await services.auth[method]();
+        return send(res, 200, { message: typeof result === 'string' ? result : result.message });
+      }
+      if (req.url === '/api/backup/export' && services.backup) return send(res, 200, { file: await services.backup.export(body.password) });
+      if (req.url === '/api/backup/import' && services.backup) {
+        if (services.work?.processing || services.work?.flushing || services.work?.scheduler.running || services.history?.busy) throw new BackupError('正在整理、同步或发送提醒，请等本轮完成后导入。');
+        services.backup.importing = true;
+        let message;
+        try { message = await services.backup.import(body.file, body.password, body.confirmed); }
+        finally { services.backup.importing = false; }
+        res.once('finish', () => services.restart?.());
+        return send(res, 200, { message });
+      }
+      if (req.url === '/api/app/restart') { res.once('finish', () => services.restart?.()); return send(res, 200, { message: '后台正在重新启动。' }); }
+      if (req.url === '/api/app/stop' && services.stop) { await services.stop(); res.once('finish', () => services.restart?.()); return send(res, 200, { message: '应用后台已停止。' }); }
       if (req.url.startsWith('/api/work/') && services.work) {
         const work = services.work;
         const operations = {
@@ -85,6 +108,7 @@ export function createSetupServer(setup, template, services = {}) {
       }
       if (req.url === '/api/jira/connect' && services.jira) {
         await services.jira.configure(body);
+        services.history?.start();
         return send(res, 200, { message: 'Jira 已连接，密码已在本机加密保存。' });
       }
       if (req.url === '/api/jira/check' && services.jira) {
@@ -98,7 +122,9 @@ export function createSetupServer(setup, template, services = {}) {
       await setup.pushTest();
       return send(res, 200, { message: '测试提醒已提交，请在企业微信确认收到。' });
     } catch (error) {
-      if (error instanceof JiraError || error instanceof WorkError) return send(res, 400, { error: error.message });
+      if (error instanceof JiraError || error instanceof WorkError || error instanceof BackupError) return send(res, 400, { error: error.message });
+      if (req.url.startsWith('/api/backup/')) return send(res, 400, { error: '备份操作未完成，请检查文件大小、磁盘空间后重试。' });
+      if (req.url.startsWith('/api/codex/')) return send(res, 400, { error: 'Codex 组件不可用，请重新安装修复。' });
       if (req.url.startsWith('/api/work/')) return send(res, 400, { error: '本机操作未完成，请稍后重试。' });
       // 不将 SDK 异常中的请求、认证字段或帧内容回传给页面。
       return send(res, 400, { error: req.url === '/api/connect'
@@ -112,15 +138,22 @@ export function createSetupServer(setup, template, services = {}) {
 }
 
 async function main() {
-  const local = path.join(root, '.local');
-  const setup = new WecomSetup(new CredentialStore(local));
-  const jira = new JiraClient(new CredentialStore(local, 'jira.dpapi'));
+  const local = localRoot;
+  const data = await dataDirectory(local);
+  const wecomStore = new CredentialStore(data), jiraStore = new CredentialStore(data, 'jira.dpapi');
+  const setup = new WecomSetup(wecomStore);
+  const jira = new JiraClient(jiraStore);
   await jira.initialize();
-  const store = new StateStore(local);
+  const store = new StateStore(data);
   await store.initialize();
   const writer = new CodexWriter(path.join(local, 'codex'));
+  const auth = new CodexAuth();
+  const backup = new BackupService(local, store, wecomStore, jiraStore);
+  const history = new HistoryService({store,jira});
+  void auth.check();
   const scheduler = new Scheduler({ store, jira, wecom: setup, notify: notifyLocal, online: isOnline });
   const work = new WorkService({ store, writer, wecom: setup, scheduler, notify: notifyLocal });
+  work.maintenance = scheduler.maintenance = history.maintenance = () => backup.pending || backup.importing;
   setup.onText = (text, messageId) => work.handle(text, messageId);
   const template = await readFile(path.join(root, 'web', 'index.html'), 'utf8');
   const assets = {
@@ -128,21 +161,26 @@ async function main() {
     '/view-state.mjs': { body: await readFile(path.join(root, 'web', 'view-state.mjs'), 'utf8'), type: 'text/javascript; charset=utf-8' },
     '/style.css': { body: await readFile(path.join(root, 'web', 'style.css'), 'utf8'), type: 'text/css; charset=utf-8' },
   };
-  const { server, instance } = createSetupServer(setup, template, { jira, work, assets });
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(60500, '127.0.0.1', resolve); });
+  let interval;
+  const close = () => { clearInterval(interval); auth.cancel(); writer.child?.kill(); setup.close(); server.close(); setTimeout(() => process.exit(0), 1000).unref(); };
+  const { server, instance } = createSetupServer(setup, template, { jira, work, assets, auth, backup, history, restart: () => close(), stop: () => writeFile(path.join(local, 'stopped'), 'stopped') });
+  const port = Number(process.env.JIRA_REMINDER_PORT || 60500);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('本机端口无效。');
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   const url = `http://127.0.0.1:${server.address().port}/`;
   await mkdir(local, { recursive: true });
-  await writeFile(path.join(local, 'runtime.json'), JSON.stringify({ url, pid: process.pid, instance }), 'utf8');
+  await writeFile(path.join(local, 'runtime.json'), JSON.stringify({ url, pid: process.pid, instance, root }), 'utf8');
   process.stdout.write(`配置入口：${url}\n`);
   await setup.initialize();
   const run = () => {
+    if (backup.pending) return;
+    history.auto();
     void setup.recover();
     void scheduler.tick();
     void work.processJobs().catch(() => { scheduler.lastError = '本地工作记录处理失败，请检查磁盘空间。'; });
   };
   run();
-  const interval = setInterval(run, 15000);
-  const close = () => { clearInterval(interval); setup.close(); server.close(); setTimeout(() => process.exit(0), 1000).unref(); };
+  interval = setInterval(run, 15000);
   process.on('SIGINT', close);
   process.on('SIGTERM', close);
 }

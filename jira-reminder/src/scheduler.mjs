@@ -1,9 +1,15 @@
-import { beijing, dayRecord, addDays } from './dates.mjs';
+import { beijing, dayRecord, weekStart } from './dates.mjs';
+import { activitiesInRange } from './history.mjs';
 
 function escapeMarkdown(value) { return String(value).replace(/[\[\]()*_`<>\\]/g, ' ').replace(/[\r\n]/g, ' '); }
 export function weeklyPrompt(state, date) {
-  const days = Object.entries(state.days).filter(([key]) => key >= addDays(date, -5) && key <= date);
-  const notes = days.map(([key, day]) => day.summary ? `${key.slice(5)}：${day.summary}` : (day.notes?.length ? `${key.slice(5)}：${day.notes.map(note => note.text).join('；').slice(0, 70)}` : '')).filter(Boolean);
+  const imported = activitiesInRange(state,weekStart(date),date);
+  const dates = [...new Set([...Object.keys(state.days), ...imported.map(item=>item.date)])].filter(key=>key>=weekStart(date)&&key<=date).sort();
+  const notes = dates.map(key=>{
+    const day = state.days[key];
+    const text = day?.summary || [...(day?.notes||[]).filter(note=>note.kind!=='chat').map(note=>note.text), ...imported.filter(item=>item.date===key).map(item=>item.text||item.title)].join('；').slice(0,100);
+    return text ? `${key.slice(5)}：${text}` : '';
+  }).filter(Boolean);
   return `本周工作核对：${notes.length ? '\n' + notes.join('\n') : '这周主要完成了什么？'}\n下周准备做什么？有遗漏请补充，回复“周计划 …”继续核对。`;
 }
 
@@ -38,7 +44,7 @@ export class Scheduler {
   }
 
   async tick() {
-    if (this.running) return;
+    if (this.running || this.maintenance?.()) return;
     const now = this.now(); const { date, hour } = beijing(now);
     if (!this.store.snapshot().enabled || hour < 15) return;
     const state = this.store.snapshot();
