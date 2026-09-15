@@ -47,7 +47,10 @@ try {
     foreach ($taskName in @('src','web','node_modules','templates')) { Copy-Item -LiteralPath (Join-Path $taskRoot $taskName) -Destination $taskStage -Recurse }
     foreach ($taskName in @('package.json','package-lock.json','README.md','THIRD_PARTY.md','Paths.ps1','Start.ps1','Run-Background.ps1','Install-Autostart.ps1','Remove-Autostart.ps1')) { Copy-Item -LiteralPath (Join-Path $taskRoot $taskName) -Destination $taskStage }
     Copy-Item -Path (Join-Path $taskRoot 'licenses\*.txt') -Destination (Join-Path $taskStage 'licenses')
-    Copy-Item -LiteralPath (Join-Path $taskRoot 'desktop\bin') -Destination (Join-Path $taskStage 'desktop') -Recurse
+    New-Item -ItemType Directory -Path (Join-Path $taskStage 'desktop\bin') -Force | Out-Null
+    foreach ($taskBinary in @('AlmostGenius.exe','AlmostGenius.exe.config','AlmostGenius.ico','Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll')) {
+        Copy-Item -LiteralPath (Join-Path $taskRoot ('desktop\bin\'+$taskBinary)) -Destination (Join-Path $taskStage 'desktop\bin')
+    }
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Prepare-Install.ps1') -Destination (Join-Path $taskStage 'packaging')
     Set-Content -LiteralPath (Join-Path $taskStage 'installed.json') -Value '{"installed":true}' -Encoding UTF8
     Expand-Archive -LiteralPath (Join-Path $taskVendor 'node.zip') -DestinationPath (Join-Path $taskVendor 'node') -Force

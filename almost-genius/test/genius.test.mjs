@@ -102,6 +102,15 @@ test('档案保存真实证据、中文检索、确认与编辑后重新核对�
   await f.store.update(s=>{s.days={};});assert.equal(archive.get(entry.id).evidence[0].text,'调试设备通讯协议');
   assert.match(archive.export().markdown,/调试设备通讯协议/);
 });
+test('跳过策略只限制启动时间；已开始的AI可完成，离线未启动的过期记录会关闭',async()=>{
+  const f=await fixture();await f.store.update(s=>{for(const t of Object.values(s.tasks))t.enabled=false;});
+  let finish;const pending=new Promise(r=>finish=r);f.scheduler.assistant={writer:{busy:false},scheduled:async()=>pending};
+  const task=await f.tasks.create(input({action:'agent',missed:'skip'}));await f.scheduler.tick();
+  f.setTime('2026-09-15T07:02:00Z');finish({text:'已开始任务的结果',notify:true});await new Promise(r=>setImmediate(r));await f.scheduler.tick();assert.equal(f.wecom.length,1);
+  const g=await fixture();await g.store.update(s=>{for(const t of Object.values(s.tasks))t.enabled=false;});g.offline();
+  const skipped=await g.tasks.create(input({action:'agent',missed:'skip'}));g.scheduler.assistant={writer:{busy:false}};await g.scheduler.tick();
+  g.setTime('2026-09-15T07:02:00Z');g.online();await g.scheduler.tick();assert.equal(g.tasks.get(skipped.id).lastRun.status,'skipped');
+});
 test('能力网关限制定时任务读写范围并在任务失效后拒绝调用',async t=>{
   const f=await fixture();const archive=new ArchiveService(f.store);await archive.initialize();
   const service=new ToolService({...f,archive});const gateway=new ToolGateway(service);await gateway.start();t.after(()=>gateway.close());

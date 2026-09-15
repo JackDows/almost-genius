@@ -1,11 +1,11 @@
-# Almost Genius · v0.4.0 预览版
+# Almost Genius · v0.4.1 预览版
 
 本机运行的个人 AI 助手，支持独立窗口、系统托盘和企业微信。
 本版供验收与试用，v1.0.0 等用户验收、实际使用稳定后再发布。
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/JackDows/almost-genius/releases) 下载 AlmostGenius-0.4.0-Setup-x64.exe。
+从 [GitHub Releases](https://github.com/JackDows/almost-genius/releases) 下载 AlmostGenius-0.4.1-Setup-x64.exe。
 要求 Windows 10 2004 或更新版本、Windows 11，x64。安装器内含 Node 24.15.0、Codex CLI 0.154.0；缺少 WebView2 时会联网安装。
 
 安装后点击桌面的 **Almost Genius**。关闭窗口会收到托盘；右键可打开、确认填报、暂停提醒或退出。

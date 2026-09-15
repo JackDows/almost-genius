@@ -12,7 +12,8 @@ export class TaskScheduler {
   valid(task, slot) {
     const s = this.store.snapshot(), current = s.tasks[task.id];
     if (!s.enabled || !current || current.revision !== task.revision || beijing(this.now()).date !== slot.date || task.reportIncomplete && s.days[slot.date]?.completed) return false;
-    const next = occurrence(current, this.now(), s);
+    const started = s.taskRuns[runId(task, slot)]?.startedAt;
+    const next = occurrence(started ? { ...current, missed: 'today' } : current, this.now(), s);
     return next && runId(current, next) === runId(task, slot);
   }
   async set(id, patch) { await this.store.update(s => { if (s.taskRuns[id]) Object.assign(s.taskRuns[id], patch); }); }
@@ -22,7 +23,15 @@ export class TaskScheduler {
     try {
       const now = this.now(), { date } = beijing(now);
       this.lastTickAt = now.toISOString();
-      const tasks = this.tasks.list().map(task => ({ task, slot: occurrence(task, now, this.store.snapshot()) })).filter(({ task, slot }) => slot && this.valid(task, slot));
+      const snapshot = this.store.snapshot();
+      const terminal = ['done','skipped','cancelled'];
+      const expired = Object.values(snapshot.taskRuns).filter(r => !terminal.includes(r.status) && (!snapshot.tasks[r.taskId] || !this.valid(snapshot.tasks[r.taskId], r)));
+      if (expired.length) await this.store.update(s => { for (const run of expired) if (s.taskRuns[run.id]?.revision === run.revision) { s.taskRuns[run.id].status = 'skipped'; s.taskRuns[run.id].error = null; } });
+      const tasks = this.tasks.list().map(task => {
+        const state = this.store.snapshot();
+        const active = Object.values(state.taskRuns).find(r => r.taskId === task.id && r.startedAt && !terminal.includes(r.status) && this.valid(task, r));
+        return { task, slot: occurrence(task, now, state) || active };
+      }).filter(({ task, slot }) => slot && this.valid(task, slot));
       if (!tasks.some(({ task, slot }) => { const run = this.store.snapshot().taskRuns[runId(task, slot)]; return !['done', 'skipped', 'cancelled'].includes(run?.status) || run?.status === 'cancelled' && run.revision !== task.revision; })) return;
       const online = this.wecom.status().connection === 'connected' || await this.online();
       this.network = online ? 'online' : 'offline';
@@ -50,7 +59,7 @@ export class TaskScheduler {
           if (!run.text) {
             if (task.action === 'agent') {
               if (!online || this.assistant.writer.busy) continue;
-              await this.set(id, { status: 'running' });
+              await this.set(id, { status: 'running', startedAt: this.now().toISOString() });
               // AI 在独立异步工作中运行，不阻塞其它任务、本机提醒和用户改期。
               void this.runAgent(task, slot, id);
               continue;
@@ -58,6 +67,7 @@ export class TaskScheduler {
             let text;
             if (task.action === 'jira') {
               if (!online) continue;
+              await this.set(id, { startedAt: this.now().toISOString() });
               const issues = await this.jira.upcoming(date, task.dueDays);
               if (!this.valid(task, slot)) { await this.set(id, { status: 'cancelled' }); continue; }
               await this.store.update(s => { dayRecord(s, date).jira = { checkedAt: this.now().toISOString(), issues, scope: `today+${task.dueDays}` }; });
@@ -65,7 +75,7 @@ export class TaskScheduler {
             } else if (task.action === 'weekly') text = weeklyPrompt(this.store.snapshot(), date);
             else if (task.action === 'report') text = slot.customId ? '到约定的填报时间了，今天做了什么？已填好请回复“已填报”。' : '今天做了什么？我帮你整理50字以内的填报内容。已填好请回复“已填报”。';
             else text = task.instructions;
-            await this.set(id, { text, status: text ? 'ready' : 'skipped', error: null });
+            await this.set(id, { text, status: text ? 'ready' : 'skipped', error: null, startedAt: this.store.snapshot().taskRuns[id].startedAt || this.now().toISOString() });
             if (!text) continue;
           }
           for (const channel of ['local', 'wecom'].filter(c => task.channels.includes(c))) {

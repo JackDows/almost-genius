@@ -26,7 +26,7 @@ $taskStream.Dispose(); $taskIcon.Dispose(); $taskPen.Dispose(); $taskBrush.Dispo
 
 $taskCompiler = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $taskExecutable = Join-Path $taskOutput 'AlmostGenius.exe'
-& $taskCompiler /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 "/out:$taskExecutable" "/win32icon:$taskIconPath" "/win32manifest:$PSScriptRoot\app.manifest" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Net.Http.dll /reference:System.Web.Extensions.dll "/reference:$taskCore" "/reference:$taskForms" (Join-Path $PSScriptRoot 'App.cs')
+& $taskCompiler /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 "/out:$taskExecutable" "/win32icon:$taskIconPath" "/win32manifest:$PSScriptRoot\app.manifest" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Net.Http.dll /reference:System.Web.Extensions.dll "/reference:$taskCore" "/reference:$taskForms" (Join-Path $PSScriptRoot 'App.cs') (Join-Path $PSScriptRoot 'ContentPolicy.cs')
 if ($LASTEXITCODE -ne 0) { throw '桌面应用编译失败。' }
 Copy-Item -LiteralPath $taskCore,$taskForms -Destination $taskOutput -Force
 Copy-Item -LiteralPath (Join-Path $taskVendor 'runtimes\win-x64\native\WebView2Loader.dll') -Destination $taskOutput -Force

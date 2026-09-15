@@ -70,7 +70,7 @@ export function createSetupServer(setup, template, services = {}) {
         !timingSafeEqual(Buffer.from(receivedToken), Buffer.from(token))) {
       return send(res, 403, { error: '配置页已过期，请刷新页面。' });
     }
-    if (req.method === 'GET' && req.url === '/api/status') return send(res, 200, { ...setup.status(), version: '0.4.0', preview: true, tasks: services.tasks?.list(), assistantBusy: services.assistant?.processing, history: services.history?.status(), codex: services.auth?.status(), backupPending: services.backup?.pending, serverTime: new Date().toISOString(), remindersEnabled: services.work?.status().enabled || false, jira: services.jira?.status(), work: services.work?.status() });
+    if (req.method === 'GET' && req.url === '/api/status') return send(res, 200, { ...setup.status(), version: '0.4.1', preview: true, tasks: services.tasks?.list(), assistantBusy: services.assistant?.processing, history: services.history?.status(), codex: services.auth?.status(), backupPending: services.backup?.pending, serverTime: new Date().toISOString(), remindersEnabled: services.work?.status().enabled || false, jira: services.jira?.status(), work: services.work?.status() });
     if (req.method === 'GET' && req.url === '/api/tasks' && services.tasks) return send(res, 200, { tasks: services.tasks.list(true) });
     if (req.method === 'GET' && req.url === '/api/archive' && services.archive) return send(res, 200, { entries: services.archive.list(true), profile: services.archive.profile() });
     if (req.method === 'GET' && req.url === '/api/archive/export' && services.archive) return send(res, 200, services.archive.export());

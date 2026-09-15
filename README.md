@@ -2,7 +2,7 @@
 
 通过企业微信聊天的 Windows 个人 AI 助手：安排任务、整理工作、留存成长经历。
 
-当前为 **v0.4.0 预览版**。用户验收并实际使用稳定后，才升级 v1.0.0。
+当前为 **v0.4.1 预览版**。用户验收并实际使用稳定后，才升级 v1.0.0。
 
 - [安装包与预览版本](https://github.com/JackDows/almost-genius/releases)
 - [安装、使用和开发说明](almost-genius/README.md)

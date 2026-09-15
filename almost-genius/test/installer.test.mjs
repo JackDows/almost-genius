@@ -11,6 +11,23 @@ const run = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const quote = value => "'" + value.replaceAll("'", "''") + "'";
 
+test('桌面保留 Markdown、JSON、加密备份扩展名；普通网页可打开，脚本和凭据链接拒绝', { skip: process.platform !== 'win32' }, async () => {
+  const source = path.join(root, 'desktop', 'ContentPolicy.cs');
+  const script = `Add-Type -Path ${quote(source)}; @{
+    markdown=[DesktopContentPolicy]::ExportExtension('profile.md');
+    json=[DesktopContentPolicy]::ExportExtension('profile.json');
+    backup=[DesktopContentPolicy]::ExportExtension('profile.jwrbackup');
+    program=[DesktopContentPolicy]::ExportExtension('profile.exe');
+    website=[DesktopContentPolicy]::CanOpenLink('https://www.python.org/');
+    script=[DesktopContentPolicy]::CanOpenLink('javascript:alert(1)');
+    localFile=[DesktopContentPolicy]::CanOpenLink('file:///C:/test.txt');
+    credential=[DesktopContentPolicy]::CanOpenLink('https://user:secret@example.com/');
+  } | ConvertTo-Json`;
+  const encoded=Buffer.from(script,'utf16le').toString('base64');
+  const {stdout}=await run('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',encoded],{windowsHide:true,timeout:20000});
+  assert.deepEqual(JSON.parse(stdout),{markdown:'.md',json:'.json',backup:'.jwrbackup',program:null,website:true,script:false,localFile:false,credential:false});
+});
+
 test('只有计划任务、没有注册表启动项时，迁移和移除自动启动仍能完成', { skip: process.platform !== 'win32' }, async t => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), 'jwr-installer-'));
   t.after(() => rm(fixture, { recursive: true, force: true }));

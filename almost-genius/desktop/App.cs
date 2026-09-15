@@ -17,7 +17,7 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: AssemblyTitle("Almost Genius")]
 [assembly: AssemblyProduct("Almost Genius")]
-[assembly: AssemblyVersion("0.4.0.0")]
+[assembly: AssemblyVersion("0.4.1.0")]
 
 internal static class Program
 {
@@ -271,16 +271,19 @@ internal sealed class ReminderWindow : Form
                 {
                     e.Cancel = true;
                     if (!e.DownloadOperation.Uri.StartsWith("blob:" + Program.Home, StringComparison.Ordinal)) return;
-                    using (var dialog = new SaveFileDialog { Filter = "加密备份 (*.jwrbackup)|*.jwrbackup", FileName = "工作提醒-" + DateTime.Now.ToString("yyyyMMdd") + ".jwrbackup", AddExtension = true, DefaultExt = "jwrbackup" })
+                    var extension = DesktopContentPolicy.ExportExtension(e.ResultFilePath);
+                    if (extension == null) return;
+                    var filter = extension == ".md" ? "Markdown 档案 (*.md)|*.md" : extension == ".json" ? "JSON 档案 (*.json)|*.json" : "加密备份 (*.jwrbackup)|*.jwrbackup";
+                    using (var dialog = new SaveFileDialog { Filter = filter, FileName = Path.GetFileName(e.ResultFilePath), AddExtension = true, DefaultExt = extension.TrimStart('.') })
                     { if (dialog.ShowDialog(this) == DialogResult.OK) { e.ResultFilePath = dialog.FileName; e.Cancel = false; e.Handled = true; } }
                 };
-                web.CoreWebView2.NewWindowRequested += (sender, e) => { e.Handled = true; OpenJira(e.Uri); };
+                web.CoreWebView2.NewWindowRequested += (sender, e) => { e.Handled = true; OpenLink(e.Uri); };
                 web.CoreWebView2.NavigationStarting += (sender, e) =>
                 {
                     if (e.Uri.StartsWith("blob:" + Program.Home, StringComparison.Ordinal)) return;
                     Uri uri;
                     if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out uri) || uri.GetLeftPart(UriPartial.Path) != Program.Home)
-                    { e.Cancel = true; OpenJira(e.Uri); }
+                    { e.Cancel = true; OpenLink(e.Uri); }
                 };
                 web.CoreWebView2.NavigationCompleted += (sender, e) =>
                 {
@@ -296,10 +299,10 @@ internal sealed class ReminderWindow : Form
         finally { initializing = false; }
     }
 
-    private static void OpenJira(string value)
+    private static void OpenLink(string value)
     {
         Uri uri;
-        if (Uri.TryCreate(value, UriKind.Absolute, out uri) && uri.Scheme == "https" && uri.Host == "jira.aonorx.com" && uri.IsDefaultPort && String.IsNullOrEmpty(uri.UserInfo))
+        if (DesktopContentPolicy.CanOpenLink(value) && Uri.TryCreate(value, UriKind.Absolute, out uri))
         { try { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); } catch {} }
     }
 }

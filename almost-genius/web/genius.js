@@ -24,7 +24,7 @@ export function initGenius({ request, feedback, openPage }) {
   <section class="page" id="page-growth" hidden>
     <div class="page-title"><div><p class="eyebrow">GROWTH</p><h1>成长档案</h1><p class="subtitle">留下技能、项目经历与证据。待核对的内容，由你确认。</p></div><button id="archive-new" class="primary">添加记录</button></div>
     <details class="card"><summary>我的背景、目标与偏好</summary><form id="profile-form"><textarea id="profile-input" rows="12" maxlength="20000"></textarea><button class="primary">保存背景</button></form></details>
-    <div class="toolbar"><button id="archive-extract" class="secondary">从工作历史提炼候选</button><button id="archive-export" class="secondary">导出个人档案</button><select id="archive-filter" aria-label="档案筛选"><option value="all">全部</option><option value="candidate">待核对</option><option value="confirmed">已确认</option><option value="deleted">已删除</option></select></div>
+    <div class="toolbar"><button id="archive-extract" class="secondary">从工作历史提炼候选</button><select id="archive-export-format" aria-label="导出格式"><option value="markdown">Markdown 文档</option><option value="json">JSON 数据</option></select><button id="archive-export" class="secondary">导出个人档案</button><select id="archive-filter" aria-label="档案筛选"><option value="all">全部</option><option value="candidate">待核对</option><option value="confirmed">已确认</option><option value="deleted">已删除</option></select></div>
     <div id="genius-archive" class="genius-cards"></div>
   </section>
   <dialog id="task-dialog"><form id="task-form"><h2 id="task-heading">新建任务</h2>
@@ -140,7 +140,7 @@ export function initGenius({ request, feedback, openPage }) {
   $('profile-input').oninput=()=>{$('profile-input').dataset.dirty='true';};
   $('profile-form').onsubmit=async e=>{e.preventDefault(); if(await mutate('/api/archive/profile',{content:$('profile-input').value,revision:profileRevision})) {delete $('profile-input').dataset.dirty;stamp.growth=null;await load('growth');}};
   $('archive-extract').onclick=async()=>{if(await mutate('/api/archive/extract')) {openPage('chat');void load('chat');}};
-  $('archive-export').onclick=async()=>{try{const data=await request('/api/archive/export'); for(const ext of ['markdown','json']){const url=URL.createObjectURL(new Blob([data[ext]],{type:'text/plain;charset=utf-8'})),a=node('a','');a.href=url;a.download='Almost-Genius-个人档案.'+(ext==='markdown'?'md':'json');document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}feedback('档案已导出，不包含账号密钥。');}catch(e){feedback(e.message,true);}};
+  $('archive-export').onclick=async()=>{try{const data=await request('/api/archive/export'); for(const ext of [$('archive-export-format').value]){const url=URL.createObjectURL(new Blob([data[ext]],{type:'text/plain;charset=utf-8'})),a=node('a','');a.href=url;a.download='Almost-Genius-个人档案.'+(ext==='markdown'?'md':'json');document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}feedback('档案已导出，不包含账号密钥。');}catch(e){feedback(e.message,true);}};
   $('task-new').onclick=()=>editTask(); $('archive-new').onclick=()=>editArchive(); $('task-close').onclick=()=>$('task-dialog').close(); $('archive-close').onclick=()=>$('archive-dialog').close();
   $('task-frequency').onchange=$('task-action').onchange=taskVisibility; $('tasks-deleted').onchange=renderTasks; $('archive-filter').onchange=renderArchive; $('task-undo').onclick=()=>mutate('/api/tasks/undo');
   for (const id of ['chat-form','task-form','archive-form','profile-form']) {
