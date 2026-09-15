@@ -1,7 +1,8 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿param([string]$OutputPath)
+$ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 $taskSource = Join-Path $PSScriptRoot '..\web\app-icon.png'
-$taskOutput = Join-Path $PSScriptRoot 'bin\AlmostGenius.ico'
+$taskOutput = if ($OutputPath) { [IO.Path]::GetFullPath($OutputPath) } else { Join-Path $PSScriptRoot 'bin\AlmostGenius.ico' }
 $taskSizes = @(16,20,24,32,40,48,64,96,128,256)
 $taskFrames = [Collections.Generic.List[byte[]]]::new()
 $taskImage = [Drawing.Image]::FromFile($taskSource)
@@ -17,15 +18,52 @@ try {
             $taskGraphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
             $taskGraphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::HighQuality
             $taskGraphics.DrawImage($taskImage,[Drawing.Rectangle]::new(0,0,$taskSize,$taskSize))
-            $taskBitmap.Save($taskBuffer,[Drawing.Imaging.ImageFormat]::Png)
-            $taskFrames.Add($taskBuffer.ToArray())
+            if ($taskSize -eq 256) {
+                $taskBitmap.Save($taskBuffer,[Drawing.Imaging.ImageFormat]::Png)
+                $taskFrames.Add($taskBuffer.ToArray())
+            } else {
+                # .NET Framework 的 DrawIcon 会误读小尺寸 PNG 图层；使用原生 DIB 图层。
+                $taskMaskStride = [int]([Math]::Ceiling($taskSize / 32.0) * 4)
+                $taskDib = [IO.BinaryWriter]::new($taskBuffer,[Text.Encoding]::UTF8,$true)
+                try {
+                    $taskDib.Write([uint32]40)
+                    $taskDib.Write([int32]$taskSize)
+                    $taskDib.Write([int32]($taskSize * 2))
+                    $taskDib.Write([uint16]1)
+                    $taskDib.Write([uint16]32)
+                    $taskDib.Write([uint32]0)
+                    $taskDib.Write([uint32](($taskSize * 4 + $taskMaskStride) * $taskSize))
+                    foreach ($taskUnused in 1..4) { $taskDib.Write([uint32]0) }
+                    $taskMasks = [Collections.Generic.List[byte[]]]::new()
+                    $taskPixels = $taskBitmap.LockBits([Drawing.Rectangle]::new(0,0,$taskSize,$taskSize),[Drawing.Imaging.ImageLockMode]::ReadOnly,[Drawing.Imaging.PixelFormat]::Format32bppArgb)
+                    try {
+                        # ICO 的颜色与透明掩码按从下到上的行顺序存储。
+                        for ($taskRow = $taskSize - 1; $taskRow -ge 0; $taskRow--) {
+                            $taskRowPixels = [byte[]]::new($taskSize * 4)
+                            [Runtime.InteropServices.Marshal]::Copy([IntPtr]::Add($taskPixels.Scan0,$taskRow * $taskPixels.Stride),$taskRowPixels,0,$taskRowPixels.Length)
+                            $taskDib.Write($taskRowPixels)
+                            $taskMask = [byte[]]::new($taskMaskStride)
+                            for ($taskX = 0; $taskX -lt $taskSize; $taskX++) {
+                                if ($taskRowPixels[$taskX * 4 + 3] -eq 0) {
+                                    $taskMaskIndex = $taskX -shr 3
+                                    $taskMask[$taskMaskIndex] = $taskMask[$taskMaskIndex] -bor (128 -shr ($taskX % 8))
+                                }
+                            }
+                            $taskMasks.Add($taskMask)
+                        }
+                    } finally { $taskBitmap.UnlockBits($taskPixels) }
+                    foreach ($taskMask in $taskMasks) { $taskDib.Write([byte[]]$taskMask) }
+                    $taskDib.Flush()
+                    $taskFrames.Add($taskBuffer.ToArray())
+                } finally { $taskDib.Dispose() }
+            }
         } finally {
             $taskBuffer.Dispose(); $taskGraphics.Dispose(); $taskBitmap.Dispose()
         }
     }
 } finally { $taskImage.Dispose() }
 
-# Windows 10/11 支持 PNG 图层，保留透明度并适配桌面、托盘与高 DPI 显示。
+# 16–128 像素使用兼容托盘的 DIB；256 像素使用供资源管理器显示的 PNG。
 New-Item -ItemType Directory -Path (Split-Path $taskOutput -Parent) -Force | Out-Null
 $taskWriter = [IO.BinaryWriter]::new([IO.File]::Create($taskOutput))
 try {

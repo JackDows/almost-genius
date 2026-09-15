@@ -11,6 +11,42 @@ const run = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const quote = value => "'" + value.replaceAll("'", "''") + "'";
 
+test('品牌图标在 Windows 桌面使用的 .NET Framework 中能正确绘制全部托盘尺寸', { skip: process.platform !== 'win32' }, async t => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), 'almost-genius-icon-'));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const iconPath = path.join(fixture, 'AlmostGenius.ico');
+  const script = `
+$ErrorActionPreference = 'Stop'
+& ${quote(path.join(root, 'desktop', 'Build-Icon.ps1'))} -OutputPath ${quote(iconPath)} | Out-Null
+$results = foreach ($size in @(16,20,24,32,40,48,64,96,128)) {
+  $icon = [Drawing.Icon]::new(${quote(iconPath)},$size,$size)
+  $bitmap = [Drawing.Bitmap]::new($size,$size)
+  $graphics = [Drawing.Graphics]::FromImage($bitmap)
+  try {
+    $graphics.Clear([Drawing.Color]::Transparent)
+    $graphics.DrawIcon($icon,[Drawing.Rectangle]::new(0,0,$size,$size))
+    $red = 0
+    for ($y=0;$y -lt $size;$y++) {
+      for ($x=0;$x -lt $size;$x++) {
+        $pixel = $bitmap.GetPixel($x,$y)
+        if ($pixel.A -gt 128 -and $pixel.R -gt 2*$pixel.G -and $pixel.R -gt 2*$pixel.B) { $red++ }
+      }
+    }
+    [pscustomobject]@{size=$size;redFraction=$red/($size*$size);cornerAlpha=$bitmap.GetPixel(0,0).A}
+  } finally { $graphics.Dispose(); $bitmap.Dispose(); $icon.Dispose() }
+}
+ConvertTo-Json -InputObject @($results)
+`;
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+  const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded], { windowsHide: true, timeout: 30000 });
+  const results = JSON.parse(stdout);
+  assert.equal(results.length, 9);
+  for (const result of results) {
+    assert.ok(result.redFraction > 0.45, `${result.size}px icon must retain its red background, not render corrupt pixels`);
+    assert.equal(result.cornerAlpha, 0, `${result.size}px icon must retain transparent corners`);
+  }
+});
+
 test('桌面保留 Markdown、JSON、加密备份扩展名；普通网页可打开，脚本和凭据链接拒绝', { skip: process.platform !== 'win32' }, async () => {
   const source = path.join(root, 'desktop', 'ContentPolicy.cs');
   const script = `Add-Type -Path ${quote(source)}; @{
