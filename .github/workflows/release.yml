@@ -21,7 +21,7 @@ jobs:
           cache: npm
           cache-dependency-path: almost-genius/package-lock.json
       - name: 校验版本并构建安装包
-        shell: powershell
+        shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag 与 package.json 版本不一致' }
@@ -37,7 +37,7 @@ jobs:
             almost-genius/dist/SHA256SUMS.txt
       - name: 发布 GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
-        shell: powershell
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
