@@ -1,0 +1,17 @@
+{
+  "name": "almost-genius",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "Almost Genius：企业微信个人 AI 助手、任务与成长档案",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@wecom/aibot-node-sdk": "1.0.7"
+  }
+}
