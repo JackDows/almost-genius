@@ -189,3 +189,21 @@ test('桌面资源可加载，4000 字中文记录可提交，超长请求仍受
   assert.equal((await fetch(origin+'/api/work/record',{method:'POST',headers,body:JSON.stringify({text:'中'.repeat(6000),kind:'daily'})})).status,400);
   assert.equal(recorded,text);
 });
+
+test('改期接口复用本机鉴权，时间和取消操作传给同一个服务入口', async t => {
+  const calls=[];
+  const {server}=createSetupServer({status:()=>({})},'<meta name="setup-token" content="__TOKEN__">',{
+    work:{status:()=>({enabled:true}),setReminder:async time=>{calls.push(time);return '已安排';}},
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>{server.closeAllConnections();server.close();});
+  const base=`http://127.0.0.1:${server.address().port}`;
+  const body=JSON.stringify({time:'18:00'});
+  assert.equal((await fetch(base+'/api/work/reminder',{method:'POST',body})).status,403);
+  const token=(await(await fetch(base)).text()).match(/content="([a-f0-9]+)"/)[1];
+  for(const time of ['18:00',null]) {
+    const response=await fetch(base+'/api/work/reminder',{method:'POST',headers:{'Content-Type':'application/json','x-setup-token':token},body:JSON.stringify({time})});
+    assert.equal(response.status,200);
+  }
+  assert.deepEqual(calls,['18:00',null]);
+});

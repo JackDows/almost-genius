@@ -9,11 +9,11 @@ Windows 本机运行的 Jira 日报、临期任务和周计划提醒助手，支
 
 提交代码到 GitHub 后，在 Actions 中运行 **Windows 安装包**，可以先下载构建产物验证。
 
-正式发布时，让 `jira-reminder/package.json` 版本与 Tag 一致，再推送 Tag。例如版本 `0.3.0` 对应：
+正式发布时，让 `jira-reminder/package.json` 版本与 Tag 一致，再推送 Tag。例如版本 `0.3.1` 对应：
 
 ```powershell
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.3.1
+git push origin v0.3.1
 ```
 
 GitHub Actions 会执行测试、生成 Windows x64 安装包并发布 Release。账号、个人工作记录和备份文件不进入仓库或安装包。

@@ -35,7 +35,8 @@ test('导入先验证再切换目录，重启后保留完成状态、重新加�
   const dir = await temporary(t), store = new StateStore(dir); await store.initialize();
   await store.update(s=>{s.days['2026-09-14']={completed:false,notes:[]};});
   const old = await readFile(store.filename,'utf8');
-  const backup = new BackupService(dir,store,null,null), file = await encryptBackup(sample(),password);
+  const value = sample(); value.state.days['2026-09-15'].reminder = {id:'550e8400-e29b-41d4-a716-446655440000',at:'2026-09-15T10:00:00Z'};
+  const backup = new BackupService(dir,store,null,null), file = await encryptBackup(value,password);
   await assert.rejects(backup.import(file,password,false));
   await assert.rejects(backup.import(file,'wrong-password-123',true));
   assert.equal(await readFile(store.filename,'utf8'),old);
@@ -47,6 +48,7 @@ test('导入先验证再切换目录，重启后保留完成状态、重新加�
   assert.equal(restored.snapshot().days['2026-09-15'].completed,true);
   assert.equal(restored.snapshot().days['2026-09-15'].outbox,undefined);
   assert.equal(restored.snapshot().days['2026-09-15'].jobs,undefined);
+  assert.equal(restored.snapshot().days['2026-09-15'].reminder,undefined);
   assert.deepEqual(await new CredentialStore(next).read(),sample().wecom);
   assert.deepEqual(await new CredentialStore(next,'jira.dpapi').read(),sample().jira);
   assert.equal(await dataDirectory(dir),next);

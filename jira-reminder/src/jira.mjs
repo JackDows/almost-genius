@@ -4,7 +4,7 @@ export const JIRA_BASE = 'https://jira.aonorx.com';
 export class JiraError extends Error {}
 
 export function upcomingJql(date) {
-  return `assignee = currentUser() AND statusCategory != Done AND duedate >= "${addDays(date, 1)}" AND duedate < "${addDays(date, 3)}" ORDER BY duedate ASC, key ASC`;
+  return `assignee = currentUser() AND statusCategory != Done AND duedate >= "${date}" AND duedate < "${addDays(date, 3)}" ORDER BY duedate ASC, key ASC`;
 }
 
 export class JiraClient {
@@ -76,7 +76,7 @@ export class JiraClient {
         for (const issue of data.issues) {
           const due = issue.fields?.duedate;
           if (!/^[A-Z][A-Z0-9_]*-\d+$/i.test(issue.key || '') || typeof issue.fields?.summary !== 'string') throw new JiraError('Jira 任务数据不完整。');
-          if (due !== addDays(date, 1) && due !== addDays(date, 2)) continue;
+          if (due !== date && due !== addDays(date, 1) && due !== addDays(date, 2)) continue;
           if (issue.fields?.status?.statusCategory?.key === 'done') continue;
           issues.push({ key: issue.key, title: issue.fields.summary, due, url: `${JIRA_BASE}/browse/${issue.key}` });
         }

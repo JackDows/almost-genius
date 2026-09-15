@@ -66,9 +66,9 @@ export function createSetupServer(setup, template, services = {}) {
         !timingSafeEqual(Buffer.from(receivedToken), Buffer.from(token))) {
       return send(res, 403, { error: '配置页已过期，请刷新页面。' });
     }
-    if (req.method === 'GET' && req.url === '/api/status') return send(res, 200, { ...setup.status(), version: '0.3.0', history: services.history?.status(), codex: services.auth?.status(), backupPending: services.backup?.pending, serverTime: new Date().toISOString(), remindersEnabled: services.work?.status().enabled || false, jira: services.jira?.status(), work: services.work?.status() });
+    if (req.method === 'GET' && req.url === '/api/status') return send(res, 200, { ...setup.status(), version: '0.3.1', history: services.history?.status(), codex: services.auth?.status(), backupPending: services.backup?.pending, serverTime: new Date().toISOString(), remindersEnabled: services.work?.status().enabled || false, jira: services.jira?.status(), work: services.work?.status() });
     if (req.method === 'GET' && req.url === '/api/history' && services.history) return send(res,200,{entries:services.history.list()});
-    if (req.method !== 'POST' || !['/api/history/sync', '/api/codex/login', '/api/codex/check', '/api/codex/cancel', '/api/backup/export', '/api/backup/import', '/api/app/restart', '/api/app/stop', '/api/connect', '/api/test-push', '/api/jira/connect', '/api/jira/check', '/api/work/complete', '/api/work/reopen', '/api/work/record', '/api/work/retry', '/api/work/enable', '/api/work/test-local'].includes(req.url)) {
+    if (req.method !== 'POST' || !['/api/history/sync', '/api/codex/login', '/api/codex/check', '/api/codex/cancel', '/api/backup/export', '/api/backup/import', '/api/app/restart', '/api/app/stop', '/api/connect', '/api/test-push', '/api/jira/connect', '/api/jira/check', '/api/work/complete', '/api/work/reopen', '/api/work/record', '/api/work/reminder', '/api/work/retry', '/api/work/enable', '/api/work/test-local'].includes(req.url)) {
       return send(res, 404, { error: '操作不存在。' });
     }
     if (mutationActive) return send(res, 409, { error: '正在处理，请稍后。' });
@@ -100,6 +100,7 @@ export function createSetupServer(setup, template, services = {}) {
           '/api/work/complete': () => work.complete(),
           '/api/work/reopen': () => work.complete(false),
           '/api/work/record': () => work.record(body.text, body.kind),
+          '/api/work/reminder': () => work.setReminder(body.time),
           '/api/work/retry': () => work.retry(),
           '/api/work/enable': () => work.enable(body.enabled),
           '/api/work/test-local': async () => { await work.notify('Jira 本机通知测试', '本机提醒已提交。点击可查看今日完成记录。'); return '本机通知已提交，请确认 Windows 通知。'; },
@@ -113,7 +114,7 @@ export function createSetupServer(setup, template, services = {}) {
       }
       if (req.url === '/api/jira/check' && services.jira) {
         const issues = await services.jira.upcoming();
-        return send(res, 200, { message: `检查完成：明天或后天到期的未完成任务共 ${issues.length} 条。`, issues });
+        return send(res, 200, { message: `检查完成：临期任务共 ${issues.length} 条。`, issues });
       }
       if (req.url === '/api/connect') {
         await setup.configure(body);

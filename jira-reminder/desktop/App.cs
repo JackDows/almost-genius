@@ -17,7 +17,7 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: AssemblyTitle("Jira 工作提醒")]
 [assembly: AssemblyProduct("Jira 工作提醒")]
-[assembly: AssemblyVersion("0.3.0.0")]
+[assembly: AssemblyVersion("0.3.1.0")]
 
 internal static class Program
 {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runtimeView, nextReminder, issueView } from '../web/view-state.mjs';
+import { runtimeView, nextReminder, issueView, dueLabel } from '../web/view-state.mjs';
 const status = { serverTime:'2026-09-15T05:00:00Z', connection:'connected', jira:{configured:true,issues:[],lastCheckAt:null}, work:{enabled:true,notice:'',today:{completed:false,sent:{},jira:null}} };
 
 test('桌面运行标记区分后台失联、暂停、企业微信异常和正常运行', () => {
@@ -22,4 +22,13 @@ test('后台重启后仍显示今日保存的 Jira 检查，新查询结果优�
   const saved = {...status,work:{...status.work,today:{...status.work.today,jira:{checkedAt:'2026-09-15T07:00:00Z',issues:[{key:'T-1'}]}}}};
   assert.equal(issueView(saved).issues[0].key,'T-1');
   assert.deepEqual(issueView({...saved,jira:{lastCheckAt:'2026-09-15T08:00:00Z',issues:[]}}).issues,[]);
+});
+
+test('工作台显示约定时间、到点待补发和已完成后的默认计划', () => {
+  const custom = {...status,serverTime:'2026-09-15T09:00:00Z',work:{...status.work,today:{completed:false,jira:{issues:[]},sent:{},reminder:{id:'test',at:'2026-09-15T10:00:00Z'}}}};
+  assert.equal(nextReminder(custom).time,'18:00');
+  assert.equal(nextReminder({...custom,serverTime:'2026-09-15T10:10:00Z'}).time,'待补执行');
+  assert.equal(nextReminder({...custom,work:{...custom.work,today:{...custom.work.today,completed:true}}}).time,'15:00');
+  assert.equal(dueLabel('2027-01-01','2026-12-31'),'明日到期');
+  assert.equal(dueLabel('2026-09-15','2026-09-15'),'今天到期');
 });

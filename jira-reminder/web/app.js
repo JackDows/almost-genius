@@ -1,4 +1,4 @@
-import { runtimeView, nextReminder, issueView } from './view-state.mjs';
+import { runtimeView, nextReminder, issueView, dueLabel } from './view-state.mjs';
 
 const $ = id => document.getElementById(id);
 let token = document.querySelector('meta[name="setup-token"]').content;
@@ -75,7 +75,7 @@ function updateResult() {
 
 function renderIssues() {
   const view = issueView(status);
-  const snapshot = JSON.stringify(view);
+  const snapshot = JSON.stringify([status.work.date, view]);
   $('due-count').textContent = view.checkedAt ? view.issues.length : '—';
   $('due-caption').textContent = view.checkedAt ? '已检查 · ' + time(view.checkedAt) : '15:00 自动检查';
   $('jira-check-time').textContent = view.checkedAt ? '最近检查 ' + time(view.checkedAt, true) : '分配给我的未完成任务 · 可立即检查';
@@ -83,14 +83,14 @@ function renderIssues() {
   lastIssues = snapshot;
   $('jira-issues').replaceChildren();
   if (!view.checkedAt) return empty($('jira-issues'), '尚未检查，点击右上角刷新即可查看。');
-  if (!view.issues.length) return empty($('jira-issues'), '明天和后天没有即将到期的任务。');
+  if (!view.issues.length) return empty($('jira-issues'), '未来三天（含今天）没有临期任务。');
   for (const issue of view.issues) {
     const link = document.createElement('a'); link.className = 'issue'; link.href = issue.url; link.target = '_blank'; link.rel = 'noreferrer';
     const top = document.createElement('div'); top.className = 'issue-top';
     const key = document.createElement('span'); key.className = 'issue-key'; key.textContent = issue.key;
-    const due = document.createElement('span'); due.className = 'issue-due'; due.textContent = issue.due.slice(5) + ' 到期';
+    const due = document.createElement('span'); due.className = 'issue-due'; due.textContent = dueLabel(issue.due, status.work.date);
     const title = document.createElement('h3'); title.textContent = issue.title;
-    const caption = document.createElement('div'); caption.className = 'issue-link'; caption.textContent = '在 Jira 中查看 ↗';
+    const caption = document.createElement('div'); caption.className = 'issue-link'; caption.textContent = '到期时间' + issue.due.replaceAll('-', '.') + ' · 在 Jira 中查看 ↗';
     top.append(key,due); link.append(top,title,caption); $('jira-issues').append(link);
   }
 }
@@ -121,6 +121,11 @@ function render() {
   $('reopen').hidden = !day.completed;
   $('schedule-pill').textContent = work.enabled ? '已启用' : '已暂停';
   $('schedule-pill').className = 'pill ' + (work.enabled ? 'green' : 'amber');
+  const customPending = !day.completed && day.reminder && ['local','wecom'].some(channel => !day.sent?.[`report-custom:${day.reminder.id}.${channel}`]);
+  $('reminder-state').textContent = customPending ? '填报提醒已安排：今天 ' + time(day.reminder.at) : '可对机器人说“今天晚上六点再提醒我”。';
+  $('reminder-cancel').hidden = !customPending;
+  $('reminder-cancel').disabled = working;
+  $('reminder-submit').disabled = working || day.completed || !work.enabled;
   const next = nextReminder(status);
   $('next-time').textContent = next.time; $('next-description').textContent = next.description;
   $('note-count').textContent = day.notes?.length || 0;
@@ -171,7 +176,7 @@ async function refresh() {
     $('runtime-text').textContent = '后台未连接'; $('runtime-dot').className = 'dot red';
     $('settings-runtime').textContent = '后台未连接';
     $('service-banner').hidden = false; $('service-banner').textContent = '后台暂未连接，正在自动重试。未提交的工作文字会保留在当前窗口。';
-    for (const id of ['complete','jira-check','toggle-reminders','test-push']) $(id).disabled = true;
+    for (const id of ['complete','jira-check','toggle-reminders','test-push','reminder-submit','reminder-cancel']) $(id).disabled = true;
   } finally { polling = false; }
 }
 
@@ -204,6 +209,8 @@ $('test-local').addEventListener('click', () => action('/api/work/test-local'));
 $('test-push').addEventListener('click', () => action('/api/test-push'));
 $('toggle-reminders').addEventListener('click', () => action('/api/work/enable',{enabled:!status?.work?.enabled}));
 $('jira-check').addEventListener('click', () => action('/api/jira/check'));
+$('reminder-form').addEventListener('submit', event => { event.preventDefault(); void action('/api/work/reminder', {time:$('reminder-time').value}); });
+$('reminder-cancel').addEventListener('click', () => action('/api/work/reminder', {time:null}));
 $('note-form').addEventListener('submit', async event => { event.preventDefault(); const text = $('note').value; const selectedKind = kind; if (await action('/api/work/record',{text,kind:selectedKind}) && $('note').value === text) $('note').value = ''; });
 $('jira-form').addEventListener('submit', async event => { event.preventDefault(); if (await action('/api/jira/connect',{username:$('jira-user').value,password:$('jira-password').value})) { $('jira-password').value = ''; $('jira-details').open = false; } });
 $('config-form').addEventListener('submit', async event => { event.preventDefault(); if (await action('/api/connect',{botId:$('bot-id').value,secret:$('secret').value})) $('secret').value = ''; });

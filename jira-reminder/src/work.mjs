@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { beijing, dayRecord, weekStart } from './dates.mjs';
 import { weeklyPrompt } from './scheduler.mjs';
 import { activitiesInRange } from './history.mjs';
+import { reminderCommand } from './reminder-time.mjs';
 
 export class WorkError extends Error {}
 export class WorkService {
@@ -21,7 +22,7 @@ export class WorkService {
 
   async complete(completed = true) {
     const now = this.now(); const { date } = beijing(now);
-    await this.store.update(state => { const day = dayRecord(state, date); day.completed = completed; day.completedAt = completed ? now.toISOString() : null; });
+    await this.store.update(state => { const day = dayRecord(state, date); day.completed = completed; day.completedAt = completed ? now.toISOString() : null; if (completed) delete day.reminder; });
     return completed ? '已记录今日填报完成，今晚不再提醒填报。' : '已取消今日完成标记。';
   }
 
@@ -31,6 +32,22 @@ export class WorkService {
     await this.store.update(state => { state.enabled = enabled; });
     if (enabled) void this.scheduler.tick();
     return enabled ? '每日提醒已启用。' : '每日提醒已暂停。';
+  }
+
+  async setReminder(time) {
+    if (this.maintenance?.()) throw new WorkError('正在导入备份，请稍后再调整提醒。');
+    if (time !== null && (typeof time !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time))) throw new WorkError('请填写今天的时间，例如18:00。');
+    await this.store.update(state => {
+      const now = this.now(), { date } = beijing(now);
+      const day = dayRecord(state, date);
+      if (time === null) { delete day.reminder; return; }
+      if (!state.enabled) throw new WorkError('提醒当前已暂停，请先在本机恢复提醒。');
+      if (day.completed) throw new WorkError('今天已标记填报完成，无需再提醒。需要修改时先回复“撤销完成”。');
+      const at = new Date(`${date}T${time}:00+08:00`);
+      if (at.getTime() <= now.getTime()) throw new WorkError('这个时间已过，请指定今天稍后的时间。');
+      day.reminder = { id: randomUUID(), at: at.toISOString(), requestedAt: now.toISOString() };
+    });
+    return time === null ? '已取消本次改期，恢复当天默认提醒。' : `已安排今天${time}提醒填报。`;
   }
 
   async record(text, kind = 'daily', origin = 'local') {
@@ -65,12 +82,21 @@ export class WorkService {
     if (this.maintenance?.()) return '正在导入备份，请在后台恢复后重发这条消息。';
     const previous = this.store.snapshot().messages[messageId];
     if (previous) return previous;
+    const reminder = reminderCommand(text, this.now());
     let response;
     if (text === '已填报') response = await this.complete();
     else if (text === '撤销完成') response = await this.complete(false);
     else if (text === '测试') response = '收发正常。发送工作内容可整理日报；填好后回复“已填报”。';
-    else if (text === '状态') response = `${beijing(this.now()).date}：${this.status().today.completed ? '已填报' : '尚未确认填报'}。提醒${this.store.snapshot().enabled ? '已启用' : '未启用'}。`;
+    else if (text === '状态') {
+      const { today } = this.status();
+      const pending = today.reminder && ['local', 'wecom'].some(channel => !today.sent?.[`report-custom:${today.reminder.id}.${channel}`]);
+      response = `${beijing(this.now()).date}：${today.completed ? '已填报' : '尚未确认填报'}。提醒${this.store.snapshot().enabled ? '已启用' : '未启用'}。${pending ? `填报提醒：今天${new Date(Date.parse(today.reminder.at) + 8 * 3600000).toISOString().slice(11,16)}。` : ''}`;
+    }
     else if (text === '重试') response = await this.retry();
+    else if (reminder) {
+      try { response = reminder.error || await this.setReminder(reminder.time); }
+      catch (error) { if (!(error instanceof WorkError)) throw error; response = error.message; }
+    }
     else if (['日报', '周报', '周计划', '聊天'].includes(text)) {
       const kind = text === '日报' ? 'daily' : text === '聊天' ? 'chat' : 'weekly';
       await this.store.update(state => { state.mode = { date: beijing(this.now()).date, kind }; });

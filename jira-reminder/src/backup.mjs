@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { CredentialStore } from './store.mjs';
 import { validateCredentials } from './wecom.mjs';
+import { beijing } from './dates.mjs';
 
 const scrypt = promisify(derive);
 const aad = Buffer.from('JiraWorkReminder.backup.v1');
@@ -35,6 +36,7 @@ export function validateBackup(value) {
   }
   for (const [date, day] of Object.entries(value.state.days)) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || !object(day) || typeof day.completed !== 'boolean' || !Array.isArray(day.notes) || (day.sent !== undefined && !object(day.sent))) throw new BackupError('工作记录格式不完整。');
+    if (day.reminder && (!object(day.reminder) || !/^[a-f0-9-]{36}$/.test(day.reminder.id || '') || !Number.isFinite(Date.parse(day.reminder.at)) || beijing(new Date(day.reminder.at)).date !== date)) throw new BackupError('填报改期记录无效。');
     for (const key of ['summary','weekly','chat']) if (day[key] != null && typeof day[key] !== 'string') throw new BackupError('草稿格式无效。');
     if (day.notes.some(n => !object(n) || typeof n.text !== 'string' || n.text.length > 4000 || !['daily','weekly','chat'].includes(n.kind))) throw new BackupError('工作记录内容无效。');
     if (day.conversations && (!object(day.conversations) || Object.entries(day.conversations).some(([kind, turns]) => !['daily','weekly','chat'].includes(kind) || !Array.isArray(turns) || turns.some(t => !object(t) || !['user','assistant'].includes(t.role) || typeof t.text !== 'string')))) throw new BackupError('对话记录格式无效。');
@@ -106,7 +108,7 @@ export class BackupService {
     const generation = randomUUID(), directory = path.join(this.local, 'data', generation);
     const state = structuredClone(value.state);
     state.enabled = false; state.messages = {}; delete state.mode;
-    for (const day of Object.values(state.days)) { delete day.jobs; delete day.outbox; delete day.jira; }
+    for (const day of Object.values(state.days)) { delete day.jobs; delete day.outbox; delete day.jira; delete day.reminder; }
     await mkdir(directory, { recursive: true });
     if (value.wecom) await new CredentialStore(directory).write(value.wecom);
     if (value.jira) await new CredentialStore(directory, 'jira.dpapi').write(value.jira);

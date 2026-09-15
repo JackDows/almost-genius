@@ -1,4 +1,4 @@
-import { beijing, dayRecord, weekStart } from './dates.mjs';
+import { beijing, dayRecord, weekStart, addDays } from './dates.mjs';
 import { activitiesInRange } from './history.mjs';
 
 function escapeMarkdown(value) { return String(value).replace(/[\[\]()*_`<>\\]/g, ' ').replace(/[\r\n]/g, ' '); }
@@ -15,20 +15,27 @@ export function weeklyPrompt(state, date) {
 
 export function pendingItems(state, now, channel) {
   const { date, hour, weekday } = beijing(now);
-  if (!state.enabled || hour < 15) return [];
+  if (!state.enabled) return [];
   const day = state.days[date] || {};
   const sent = day.sent || {};
   const pending = id => !sent[`${id}.${channel}`];
   const items = [];
   if (!day.completed) {
-    if (hour >= 22 && pending('report22')) items.push({ ids: ['report15', 'report22'], text: '今日 Jira 工时填报完成了吗？未填的话，告诉我今天做了什么；填好后回复“已填报”。' });
-    else if (hour < 22 && pending('report15')) items.push({ ids: ['report15'], text: '今天做了什么？我帮你整理 50 字以内的填报内容。已填好请回复“已填报”。' });
+    const reminder = day.reminder;
+    const customId = reminder && `report-custom:${reminder.id}`;
+    const waiting = reminder && Date.parse(reminder.at) > now.getTime();
+    if (reminder && !waiting && pending(customId)) {
+      items.push({ ids: [customId, 'report15', ...(hour >= 22 ? ['report22'] : [])], text: '到约定的填报时间了，今天做了什么？已填好请回复“已填报”。' });
+    } else if (!waiting && hour >= 22 && pending('report22')) items.push({ ids: ['report22', 'report15'], text: '今日 Jira 工时填报完成了吗？未填的话，告诉我今天做了什么；填好后回复“已填报”。' });
+    else if (!waiting && hour >= 15 && hour < 22 && pending('report15')) items.push({ ids: ['report15'], text: '今天做了什么？我帮你整理 50 字以内的填报内容。已填好请回复“已填报”。' });
   }
-  if (day.jira?.issues?.length && pending('jira')) {
-    const lines = day.jira.issues.map(issue => `${issue.due.slice(5)} [${issue.key}](${issue.url}) ${escapeMarkdown(issue.title)}`);
-    items.push({ ids: ['jira'], text: '明天／后天到期：\n' + lines.join('\n') });
+  if (hour >= 15 && day.jira?.issues?.length && pending('jira')) {
+    const labels = { [date]: '今天到期', [addDays(date, 1)]: '明日到期', [addDays(date, 2)]: '后天到期' };
+    const lines = [...day.jira.issues].sort((a, b) => a.due.localeCompare(b.due) || a.key.localeCompare(b.key))
+      .map((issue, index) => `${index + 1}、[${escapeMarkdown(issue.title)}（${issue.key}）](${issue.url}) ${labels[issue.due] || '到期'} 到期时间${issue.due.replaceAll('-', '.')}`);
+    items.push({ ids: ['jira'], text: '临期任务：\n' + lines.join('\n') });
   }
-  if (weekday === 6 && pending('weekly')) items.push({ ids: ['weekly'], text: weeklyPrompt(state, date) });
+  if (hour >= 15 && weekday === 6 && pending('weekly')) items.push({ ids: ['weekly'], text: weeklyPrompt(state, date) });
   return items;
 }
 
@@ -46,9 +53,10 @@ export class Scheduler {
   async tick() {
     if (this.running || this.maintenance?.()) return;
     const now = this.now(); const { date, hour } = beijing(now);
-    if (!this.store.snapshot().enabled || hour < 15) return;
+    if (!this.store.snapshot().enabled) return;
     const state = this.store.snapshot();
-    if (state.days[date]?.jira && !pendingItems(state, now, 'local').length && !pendingItems(state, now, 'wecom').length) return;
+    const needsJira = hour >= 15 && state.days[date]?.jira?.scope !== 'today+2';
+    if (!needsJira && !pendingItems(state, now, 'local').length && !pendingItems(state, now, 'wecom').length) return;
     this.running = true;
     try {
       this.lastTickAt = now.toISOString();
@@ -56,20 +64,19 @@ export class Scheduler {
       this.network = online ? 'online' : 'offline';
       if (!online) {
         if (!this.store.snapshot().days[date]?.sent?.['offline.local']) {
-          const items = pendingItems(this.store.snapshot(), now, 'local');
-          await this.notify('Jira 工作提醒', '当前未联网，请连接网络。联网后会自动补检查。\n' + items.map(item => item.text).join('\n').slice(0, 150));
-          await this.mark(date, ['offline', ...items.flatMap(item => item.ids)], 'local');
+          await this.notify('Jira 工作提醒', '当前未联网，请连接网络。联网后会自动补检查。');
+          await this.mark(date, ['offline'], 'local');
         }
         // 22 点的本机日报提醒不能因为离线而丢失。
         await this.deliver(date, 'local');
         return;
       }
 
-      if (!this.store.snapshot().days[date]?.jira && now.getTime() >= this.retryJiraAt) {
+      if (needsJira && now.getTime() >= this.retryJiraAt) {
         this.retryJiraAt = now.getTime() + 5 * 60000;
         try {
           const issues = await this.jira.upcoming(date);
-          await this.store.update(state => { dayRecord(state, date).jira = { checkedAt: now.toISOString(), issues }; });
+          await this.store.update(state => { dayRecord(state, date).jira = { checkedAt: now.toISOString(), issues, scope: 'today+2' }; });
           this.lastError = '';
         } catch {
           this.lastError = this.jira.status().notice || 'Jira 检查未完成，请在本机页面查看连接。';
@@ -101,12 +108,17 @@ export class Scheduler {
     if (beijing(now).date !== date) return;
     const items = pendingItems(this.store.snapshot(), now, channel);
     if (!items.length) return;
-    const text = items.map(item => item.text).join('\n\n');
-    if (channel === 'wecom') await this.wecom.push(text);
-    else {
-      const localText = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
-      await this.notify('Jira 工作提醒', localText.slice(0, 195) + '\n点击查看任务链接和今日记录。');
+    for (const item of items) {
+      if (beijing(this.now()).date !== date) return;
+      // 每条独立确认；发送期间改期或确认完成后，不继续发送已失效的提醒。
+      const current = pendingItems(this.store.snapshot(), this.now(), channel).find(next => next.ids[0] === item.ids[0]);
+      if (!current) continue;
+      if (channel === 'wecom') await this.wecom.push(current.text);
+      else {
+        const localText = current.text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+        await this.notify('Jira 工作提醒', localText.slice(0, 195) + '\n点击查看任务链接和今日记录。');
+      }
+      await this.mark(date, current.ids, channel);
     }
-    await this.mark(date, items.flatMap(item => item.ids), channel);
   }
 }
