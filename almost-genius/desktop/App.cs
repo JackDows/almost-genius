@@ -101,6 +101,7 @@ internal sealed class ReminderContext : ApplicationContext
     private readonly ToolStripMenuItem statusItem = new ToolStripMenuItem("正在连接后台…") { Enabled = false };
     private readonly ToolStripMenuItem completeItem = new ToolStripMenuItem("今日已填报");
     private readonly ToolStripMenuItem toggleItem = new ToolStripMenuItem("暂停提醒");
+    private readonly Icon applicationIcon = LoadIcon(SystemInformation.IconSize.Width);
     private readonly Icon green = CreateIcon(Color.FromArgb(39, 112, 86));
     private readonly Icon amber = CreateIcon(Color.FromArgb(183, 130, 47));
     private readonly Icon gray = CreateIcon(Color.FromArgb(127, 134, 139));
@@ -139,7 +140,7 @@ internal sealed class ReminderContext : ApplicationContext
     private void Open()
     {
         if (exiting) return;
-        if (window == null || window.IsDisposed) window = new ReminderWindow(service, green);
+        if (window == null || window.IsDisposed) window = new ReminderWindow(service, applicationIcon);
         window.Show();
         if (window.WindowState == FormWindowState.Minimized) window.WindowState = FormWindowState.Normal;
         window.Activate();
@@ -197,18 +198,24 @@ internal sealed class ReminderContext : ApplicationContext
         ExitThread();
     }
 
+    private static Icon LoadIcon(int size)
+    {
+        return new Icon(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "AlmostGenius.ico"), size, size);
+    }
+
     internal static Icon CreateIcon(Color color)
     {
-        using (var bitmap = new Bitmap(64, 64))
+        using (var icon = LoadIcon(32))
+        using (var bitmap = new Bitmap(32, 32))
         using (var g = Graphics.FromImage(bitmap))
         using (var brush = new SolidBrush(color))
-        using (var pen = new Pen(Color.White, 6))
+        using (var pen = new Pen(Color.White, 1.5f))
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.Clear(Color.Transparent);
-            g.FillEllipse(brush, 2, 2, 60, 60);
-            pen.StartCap = pen.EndCap = LineCap.Round;
-            g.DrawLines(pen, new[] { new Point(17, 33), new Point(28, 43), new Point(47, 22) });
+            g.DrawIcon(icon, new Rectangle(0, 0, 32, 32));
+            g.FillEllipse(brush, 20, 20, 11, 11);
+            g.DrawEllipse(pen, 20, 20, 11, 11);
             var handle = bitmap.GetHicon();
             try { return (Icon)Icon.FromHandle(handle).Clone(); }
             finally { DestroyIcon(handle); }
@@ -223,7 +230,7 @@ internal sealed class ReminderContext : ApplicationContext
             exiting = true;
             timer.Stop(); timer.Dispose(); wake.Unregister(null);
             tray.Visible = false; tray.Dispose(); dispatcher.Dispose(); service.Dispose();
-            green.Dispose(); amber.Dispose(); gray.Dispose();
+            applicationIcon.Dispose(); green.Dispose(); amber.Dispose(); gray.Dispose();
         }
         base.Dispose(disposing);
     }

@@ -186,6 +186,7 @@ async function main() {
   };
   const template = await readFile(path.join(root, 'web', 'index.html'), 'utf8');
   const assets = {
+    '/app-icon.png': { body: await readFile(path.join(root, 'web', 'app-icon.png')), type: 'image/png' },
     '/genius.js': { body: await readFile(path.join(root, 'web', 'genius.js'), 'utf8'), type: 'text/javascript; charset=utf-8' },
     '/app.js': { body: await readFile(path.join(root, 'web', 'app.js'), 'utf8'), type: 'text/javascript; charset=utf-8' },
     '/view-state.mjs': { body: await readFile(path.join(root, 'web', 'view-state.mjs'), 'utf8'), type: 'text/javascript; charset=utf-8' },

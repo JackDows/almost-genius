@@ -96,5 +96,7 @@ Codex 运行使用临时参数，不更改全局配置；关闭 shell、其它�
 运行 packaging/Build-Release.ps1。构建会校验下载哈希、执行测试、编译桌面程序并生成 dist 下的安装包与 SHA256SUMS.txt。
 Windows PowerShell 脚本使用 UTF-8 BOM。GitHub Actions 在干净 Windows 环境验证安装、升级和卸载保留数据。
 
+图标源图为 `web/app-icon.png`，网页直接使用；`desktop/Build-Icon.ps1` 将其转换为 16–256 像素的多尺寸 Windows 图标，桌面构建和安装包共用。托盘在品牌图标右下角显示状态色点。
+
 安装器沿用固定 AppId，实现原地升级；不要把开发 .local、账号或备份复制进发行目录。
 开源版本、许可证与本地适配见 [THIRD_PARTY.md](THIRD_PARTY.md)。
