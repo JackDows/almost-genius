@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, readdir, access, writeFile, readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import net from 'node:net';
 import { root, localRoot } from './paths.mjs';
 
 export async function findCodex() {
@@ -15,8 +16,19 @@ export async function findCodex() {
 
 // 所有登录、状态检查和 AI 请求都使用本应用独立的凭据目录。
 export class CodexRuntime {
-  constructor({ home = path.join(localRoot, 'codex-home'), environment = process.env, find = findCodex, spawnProcess = spawn } = {}) {
+  constructor({ home = path.join(localRoot, 'codex-home'), networkFile = path.join(localRoot, 'codex-network.json'), environment = process.env, find = findCodex, spawnProcess = spawn } = {}) {
     this.home = path.resolve(home); this.environment = environment; this.find = find; this.spawnProcess = spawnProcess;
+    this.networkFile = networkFile; this.proxyUrl = '';
+  }
+  async initialize() {
+    try { this.proxyUrl = validateProxy(JSON.parse(await readFile(this.networkFile, 'utf8')).proxyUrl); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+  async configureNetwork(proxyUrl) {
+    const value = validateProxy(proxyUrl);
+    await mkdir(path.dirname(this.networkFile), { recursive: true });
+    await writeFile(this.networkFile, JSON.stringify({ proxyUrl: value }), 'utf8');
+    this.proxyUrl = value;
   }
   async start(args, options = {}) {
     await mkdir(this.home, { recursive: true });
@@ -26,13 +38,40 @@ export class CodexRuntime {
       if (['CODEX_HOME', 'CODEX_API_KEY', 'CODEX_ACCESS_TOKEN', 'OPENAI_API_KEY', 'CODEX_THREAD_ID'].includes(name.toUpperCase())) delete env[name];
     }
     env.CODEX_HOME = this.home;
+    if (this.proxyUrl) {
+      const bypass = Object.entries(env).filter(([name]) => name.toUpperCase() === 'NO_PROXY').map(([, value]) => value);
+      for (const name of Object.keys(env)) if (['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY'].includes(name.toUpperCase())) delete env[name];
+      env.HTTP_PROXY = env.HTTPS_PROXY = env.ALL_PROXY = this.proxyUrl;
+      env.NO_PROXY = [...bypass, 'localhost', '127.0.0.1', '[::1]', '::1'].join(',');
+    }
     return this.spawnProcess(executable, ['-c', 'cli_auth_credentials_store="file"', ...args], { ...options, windowsHide: true, env });
   }
 }
 
+function validateProxy(value) {
+  if (typeof value !== 'string') throw new Error('代理地址无效。');
+  if (!value.trim()) return '';
+  const url = new URL(value.trim());
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error('请填写不含账号密码的 HTTP 或 HTTPS 代理地址。');
+  return url.origin;
+}
+
+// CLI 的网页登录使用固定回调端口。占用时停止，不启动可能干扰其他登录的 CLI。
+export async function checkLoginPort(port = 1455) {
+  const servers = [];
+  try {
+    for (const host of ['127.0.0.1', '::1']) {
+      const server = net.createServer(); servers.push(server);
+      try {
+        await new Promise((resolve, reject) => { server.once('error', reject); server.listen({ host, port, ipv6Only: true, exclusive: true }, resolve); });
+      } catch (error) { if (!(host === '::1' && ['EAFNOSUPPORT', 'EADDRNOTAVAIL'].includes(error.code))) throw error; }
+    }
+  } finally { await Promise.all(servers.map(server => new Promise(resolve => server.close(resolve)))); }
+}
+
 function loginFailure(text, timedOut = false) {
   if (timedOut) return '登录等待已超时，本次请求已结束。请重新发起登录，并在五分钟内完成验证。';
-  if (/unsupported_country_region_territory|country,?\s*region.*not supported|country.*territory.*not supported/i.test(text)) return '登录服务拒绝了当前网络所在地区（403）。请确认账号与网络符合 OpenAI 支持范围；反复重试无法解决地区限制。';
+  if (/unsupported_country_region_territory|country,?\s*region.*not supported|country.*territory.*not supported/i.test(text)) return '官方登录接口返回地区限制（403）。这不等于账号无法使用：请检查下方网络设置，确认本应用与能正常登录的客户端使用相同连接。';
   if (/device.{0,30}(?:not enabled|disabled)|enable.{0,40}device|device.{0,30}not.{0,20}available/i.test(text)) return '账号尚未启用设备码登录。请在 ChatGPT 的设置 → 安全中启用设备码登录；工作区账号可能需要管理员允许。';
   if (/timed? out|timeout|error sending request|connection|network|dns|proxy|certificate|tls/i.test(text)) return '无法连接 Codex 登录服务。请检查网络、代理或证书设置后重试；浏览器能打开登录页不代表本机登录组件也能连接。';
   if (/expired|expired_token/i.test(text)) return '验证码已过期，请重新发起登录。';
@@ -52,11 +91,11 @@ function collectOutput(child, receive) {
 }
 
 export class CodexAuth {
-  constructor({ runtime = new CodexRuntime(), loginTimeoutMs = 300000, checkTimeoutMs = 8000 } = {}) {
-    Object.assign(this, { runtime, loginTimeoutMs, checkTimeoutMs });
+  constructor({ runtime = new CodexRuntime(), loginTimeoutMs = 300000, checkTimeoutMs = 8000, checkPort = checkLoginPort } = {}) {
+    Object.assign(this, { runtime, loginTimeoutMs, checkTimeoutMs, checkPort });
     this.operation = null; this.child = null; this.value = { state: 'checking', message: '正在检查本应用的 Codex 登录。' };
   }
-  status() { return { ...this.value }; }
+  status() { return { ...this.value, proxyUrl: this.runtime.proxyUrl || '' }; }
   async check() {
     if (this.operation) return this.status();
     const operation = { kind: 'check' }; this.operation = operation;
@@ -84,14 +123,23 @@ export class CodexAuth {
     finally { if (this.operation === operation) { this.operation = null; this.child = null; } }
     return this.status();
   }
-  async login() {
-    if (this.operation?.kind === 'login') return '登录正在进行，请使用下方验证码完成验证。';
+  async login(method = 'browser') {
+    if (!['browser', 'device'].includes(method)) throw new Error('登录方式无效。');
+    if (this.operation?.kind === 'login') return '登录正在进行，请完成当前验证或取消后重试。';
     this.cancel();
     const operation = { kind: 'login' }; this.operation = operation;
     const expiresAt = new Date(Date.now() + this.loginTimeoutMs).toISOString();
-    this.value = { state: 'logging_in', message: '正在向官方服务请求设备验证码…', expiresAt };
+    this.value = { state: 'logging_in', method, message: method === 'device' ? '正在向官方服务请求设备验证码…' : '正在打开官方网页登录…', expiresAt };
     try {
-      const child = await this.runtime.start(['login', '--device-auth'], { stdio: ['ignore', 'pipe', 'pipe'] });
+      if (method === 'browser') {
+        try { await this.checkPort(); }
+        catch {
+          if (this.operation === operation) { this.operation = null; this.value = { state: 'error', message: '网页登录回调端口（1455）不可用，可能有其他 Codex 正在登录。请完成那次登录后重试，或使用设备码登录。' }; }
+          return this.value.message;
+        }
+        if (this.operation !== operation) return '本次登录已取消。';
+      }
+      const child = await this.runtime.start(method === 'device' ? ['login', '--device-auth'] : ['login'], { stdio: ['ignore', 'pipe', 'pipe'] });
       if (this.operation !== operation) { child.on('error', () => {}); child.kill(); return '本次登录已取消。'; }
       this.child = child;
       let output = '';
@@ -106,12 +154,22 @@ export class CodexAuth {
       collectOutput(child, text => {
         if (this.operation !== operation) return;
         output = text;
+        if (method === 'browser') {
+          const address = text.match(/https:\/\/auth\.openai\.com\/oauth\/authorize\?[^\s]+(?=\s)/)?.[0];
+          if (address) {
+            try {
+              const url = new URL(address);
+              if (url.origin === 'https://auth.openai.com' && url.searchParams.has('state') && url.searchParams.has('code_challenge')) this.value = { state: 'logging_in', method, message: '请在浏览器中完成官方登录；未自动打开时，可点击下方链接。五分钟后自动停止等待。', loginUrl: url.href, expiresAt };
+            } catch {}
+          }
+          return;
+        }
         const verificationUrl = text.match(/https:\/\/auth\.openai\.com\/codex\/device(?=[\s\x1b]|$)/)?.[0];
         const userCode = text.match(/\b[A-Z0-9]{4,6}-[A-Z0-9]{4,6}\b/)?.[0];
-        if (verificationUrl && userCode) this.value = { state: 'logging_in', message: '打开官方验证页，输入下方一次性验证码。请在五分钟内完成。', verificationUrl, userCode, expiresAt };
+        if (verificationUrl && userCode) this.value = { state: 'logging_in', method, message: '打开官方验证页，输入下方一次性验证码。请在五分钟内完成。', verificationUrl, userCode, expiresAt };
       });
       child.once('error', () => finish(-1)); child.once('close', code => finish(code));
-      return '已发起独立登录，请等待验证码后打开官方验证页。';
+      return method === 'device' ? '已发起独立登录，请等待验证码后打开官方验证页。' : '已发起独立网页登录，请在浏览器中完成。';
     } catch {
       if (this.operation === operation) { this.operation = null; this.child = null; this.value = { state: 'error', message: '无法启动本应用的 Codex 登录，请检查组件和数据目录权限。' }; }
       return this.value.message;

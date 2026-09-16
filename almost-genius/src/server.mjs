@@ -7,7 +7,7 @@ import { CredentialStore, StateStore } from './store.mjs';
 import { WecomSetup } from './wecom.mjs';
 import { JiraClient, JiraError } from './jira.mjs';
 import { WorkService, WorkError } from './work.mjs';
-import { CodexWriter, CodexAuth } from './codex.mjs';
+import { CodexWriter, CodexAuth, CodexRuntime } from './codex.mjs';
 import { BackupService, BackupError, MAX_BACKUP, dataDirectory } from './backup.mjs';
 import { localRoot } from './paths.mjs';
 import { HistoryService } from './history.mjs';
@@ -76,7 +76,7 @@ export function createSetupServer(setup, template, services = {}) {
     if (req.method === 'GET' && req.url === '/api/archive/export' && services.archive) return send(res, 200, services.archive.export());
     if (req.method === 'GET' && req.url === '/api/chat' && services.assistant) return send(res, 200, services.assistant.status());
     if (req.method === 'GET' && req.url === '/api/history' && services.history) return send(res,200,{entries:services.history.list()});
-    if (req.method !== 'POST' || !['/api/tasks/create', '/api/tasks/change', '/api/tasks/undo', '/api/archive/create', '/api/archive/change', '/api/archive/profile', '/api/archive/extract', '/api/chat/send', '/api/chat/retry', '/api/history/sync', '/api/codex/login', '/api/codex/check', '/api/codex/cancel', '/api/backup/export', '/api/backup/import', '/api/app/restart', '/api/app/stop', '/api/connect', '/api/test-push', '/api/jira/connect', '/api/jira/check', '/api/work/complete', '/api/work/reopen', '/api/work/record', '/api/work/reminder', '/api/work/retry', '/api/work/enable', '/api/work/test-local'].includes(req.url)) {
+    if (req.method !== 'POST' || !['/api/tasks/create', '/api/tasks/change', '/api/tasks/undo', '/api/archive/create', '/api/archive/change', '/api/archive/profile', '/api/archive/extract', '/api/chat/send', '/api/chat/retry', '/api/history/sync', '/api/codex/login', '/api/codex/check', '/api/codex/cancel', '/api/codex/network', '/api/backup/export', '/api/backup/import', '/api/app/restart', '/api/app/stop', '/api/connect', '/api/test-push', '/api/jira/connect', '/api/jira/check', '/api/work/complete', '/api/work/reopen', '/api/work/record', '/api/work/reminder', '/api/work/retry', '/api/work/enable', '/api/work/test-local'].includes(req.url)) {
       return send(res, 404, { error: '操作不存在。' });
     }
     if (mutationActive) return send(res, 409, { error: '正在处理，请稍后。' });
@@ -96,7 +96,13 @@ export function createSetupServer(setup, template, services = {}) {
       if (req.url === '/api/history/sync' && services.history) return send(res,200,{message:services.history.start()});
       if (req.url.startsWith('/api/codex/') && services.auth) {
         const method = req.url.split('/').at(-1);
-        const result = await services.auth[method]();
+        if (method === 'network') {
+          if (services.auth.operation || services.assistant?.writer.busy || services.work?.writer.busy) return send(res, 409, { error: '请等本轮 AI 请求或登录结束后再保存网络设置。' });
+          try { await services.auth.runtime.configureNetwork(body.proxyUrl); }
+          catch { return send(res, 400, { error: '网络设置未保存。请填写 HTTP 或 HTTPS 代理地址（不含账号密码），或留空使用默认连接，并确认数据目录可写。' }); }
+          return send(res, 200, { message: '已保存，本应用下次登录和 AI 请求将使用此连接。' });
+        }
+        const result = await services.auth[method](...(method === 'login' ? [body.method || 'browser'] : []));
         return send(res, 200, { message: typeof result === 'string' ? result : result.message });
       }
       if (req.url === '/api/backup/export' && services.backup) return send(res, 200, { file: await services.backup.export(body.password) });
@@ -164,8 +170,9 @@ async function main() {
   await jira.initialize();
   const store = new StateStore(data);
   await store.initialize();
-  const writer = new CodexWriter(path.join(local, 'codex'));
-  const auth = new CodexAuth();
+  const codexRuntime = new CodexRuntime(); await codexRuntime.initialize();
+  const writer = new CodexWriter(path.join(local, 'codex'), { runtime: codexRuntime });
+  const auth = new CodexAuth({ runtime: codexRuntime });
   const backup = new BackupService(local, store, wecomStore, jiraStore);
   const history = new HistoryService({store,jira});
   void auth.check();

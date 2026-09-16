@@ -162,6 +162,30 @@ test('Windows DPAPI 可以往返保护中文及特殊字符，密文不包含原
   assert.deepEqual(await dpapi(encrypted, 'Unprotect'), plain);
 });
 
+test('Codex 网络设置需要页面令牌且运行中拒绝更改，登录接口支持网页登录和设备码', async t => {
+  const saved = [], methods = [];
+  const auth = { operation: null, runtime: { configureNetwork: async value => { saved.push(value); } }, login: async method => { methods.push(method); return '已开始'; } };
+  const writer = { busy: false };
+  const { server } = createSetupServer({ status: () => ({}) }, '<meta name="setup-token" content="__TOKEN__">', { auth, assistant: { writer } });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const token = (await (await fetch(origin)).text()).match(/content="([a-f0-9]+)"/)[1];
+  const post = (endpoint, body, authorized = true) => fetch(origin + endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(authorized ? { 'x-setup-token': token } : {}) }, body: JSON.stringify(body) });
+  assert.equal((await post('/api/codex/network', { proxyUrl: 'http://localhost:8080' }, false)).status, 403);
+  auth.operation = { kind: 'login' };
+  assert.equal((await post('/api/codex/network', { proxyUrl: '' })).status, 409);
+  auth.operation = null; writer.busy = true;
+  assert.equal((await post('/api/codex/network', { proxyUrl: '' })).status, 409);
+  writer.busy = false;
+  assert.equal(saved.length, 0);
+  assert.equal((await post('/api/codex/network', { proxyUrl: 'http://localhost:8080' })).status, 200);
+  assert.deepEqual(saved, ['http://localhost:8080']);
+  assert.equal((await post('/api/codex/login', {})).status, 200);
+  assert.equal((await post('/api/codex/login', { method: 'device' })).status, 200);
+  assert.deepEqual(methods, ['browser', 'device']);
+});
+
 test('系统 Windows PowerShell 可解析全部中文启动脚本', { skip: process.platform !== 'win32' }, async () => {
   const executable = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const directory = fileURLToPath(new URL('..', import.meta.url));

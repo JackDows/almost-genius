@@ -9,6 +9,7 @@ let polling = false;
 let kind = 'daily';
 let toastTimer;
 let lastNotes = '';
+let codexNetworkStamp;
 let lastIssues = '';
 let historyEntries = [], historyStamp = null, historyLoading = false;
 const names = { not_configured:'未配置', connecting:'连接中', connected:'已连接', disconnected:'已断开', reconnecting:'重连中', error:'连接异常' };
@@ -107,6 +108,12 @@ function render() {
   $('codex-state').textContent = {logged_in:'已登录', logged_out:'未登录', logging_in:'登录中', error:'登录异常', missing:'组件缺失', checking:'检查中'}[status.codex?.state] || '待检查';
   $('codex-message').textContent = status.codex?.message || '';
   $('codex-login').disabled = working || ['logging_in', 'checking', 'logged_in'].includes(status.codex?.state);
+  $('codex-device-login').disabled = $('codex-login').disabled;
+  $('codex-network-save').disabled = working || status.assistantBusy || work.busy || ['logging_in', 'checking'].includes(status.codex?.state);
+  if (codexNetworkStamp !== status.codex?.proxyUrl) { $('codex-proxy').value = status.codex?.proxyUrl || ''; codexNetworkStamp = status.codex?.proxyUrl; }
+  $('codex-browser').hidden = status.codex?.state !== 'logging_in' || !status.codex?.loginUrl;
+  if (status.codex?.state === 'logging_in' && status.codex?.loginUrl) $('codex-browser-link').href = status.codex.loginUrl;
+  else $('codex-browser-link').removeAttribute('href');
   $('codex-cancel').hidden = status.codex?.state !== 'logging_in';
   $('codex-device').hidden = status.codex?.state !== 'logging_in' || !status.codex?.userCode;
   $('codex-device-code').textContent = status.codex?.userCode || '';
@@ -223,6 +230,8 @@ const genius = initGenius({request,feedback,openPage});
 refresh(); setInterval(refresh,5000);
 
 $('codex-login').addEventListener('click', () => action('/api/codex/login'));
+$('codex-device-login').addEventListener('click', () => action('/api/codex/login', { method: 'device' }));
+$('codex-network').addEventListener('submit', event => { event.preventDefault(); void action('/api/codex/network', { proxyUrl: $('codex-proxy').value.trim() }); });
 $('codex-check').addEventListener('click', () => action('/api/codex/check'));
 $('codex-cancel').addEventListener('click', () => action('/api/codex/cancel'));
 $('welcome-import').addEventListener('click', () => { openPage('settings'); $('import-details').open = true; $('backup-card').scrollIntoView(); });
