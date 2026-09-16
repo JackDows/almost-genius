@@ -7,6 +7,7 @@ import { validateCredentials } from './wecom.mjs';
 import { beijing } from './dates.mjs';
 import { validateTask } from './tasks.mjs';
 import { validateEntry } from './archive.mjs';
+import { validateWorkHours } from './work-hours.mjs';
 
 const scrypt = promisify(derive);
 const aad = Buffer.from('JiraWorkReminder.backup.v1');
@@ -61,6 +62,7 @@ export function validateBackup(value) {
   }
   for (const [date, day] of Object.entries(value.state.days)) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || !object(day) || typeof day.completed !== 'boolean' || !Array.isArray(day.notes) || (day.sent !== undefined && !object(day.sent))) throw new BackupError('工作记录格式不完整。');
+    if (day.workHours !== undefined) { try { validateWorkHours(day.workHours, date); } catch { throw new BackupError('日报工时记录无效。'); } }
     if (day.reminder && (!object(day.reminder) || !/^[a-f0-9-]{36}$/.test(day.reminder.id || '') || !Number.isFinite(Date.parse(day.reminder.at)) || beijing(new Date(day.reminder.at)).date !== date)) throw new BackupError('填报改期记录无效。');
     for (const key of ['summary','weekly','chat']) if (day[key] != null && typeof day[key] !== 'string') throw new BackupError('草稿格式无效。');
     if (day.notes.some(n => !object(n) || typeof n.text !== 'string' || n.text.length > 4000 || !['daily','weekly','chat'].includes(n.kind))) throw new BackupError('工作记录内容无效。');

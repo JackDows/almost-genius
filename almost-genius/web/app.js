@@ -64,6 +64,9 @@ function updateResult() {
   $('result-count').textContent = kind === 'daily' ? (text ? [...text].length + ' 字' : '≤ 50 字') : kind === 'weekly' ? '一起核对' : '连续对话';
   $('result-text').textContent = text || '整理结果会显示在这里。';
   $('result-hint').textContent = kind === 'daily' ? '填报完成后，回复“已填报”或点击“今日已完成”。' : '有遗漏或计划变化，继续补充内容即可。';
+  const hours = status.work.hours;
+  $('result-hours').hidden = kind !== 'daily';
+  $('result-hours').textContent = hours?.jiraDuration ? `${hours.label}：${hours.display} · Jira：${hours.jiraDuration}` : hours?.message || '';
   $('conversation').replaceChildren();
   const turns = day?.conversations?.[kind] || [];
   if (!turns.length) empty($('conversation'), '发送第一条消息开始对话。');
@@ -100,6 +103,12 @@ function renderIssues() {
 function render() {
   genius.render(status);
   const work = status.work, day = work.today;
+  const hours = work.hours;
+  $('hours-label').textContent = hours?.label || '日报工时';
+  $('hours-total').textContent = hours?.display || '待确认';
+  $('hours-calculation').textContent = hours?.jiraDuration ? `${hours.calculation} · Jira：${hours.jiraDuration}` : hours?.message || '';
+  $('hours-help').textContent = hours?.state === 'needs_details' ? '直接在聊天里告诉我时间和休息时长即可，不用填表。' : '说“下班了”就按消息时间算；说“今天22:00下班”就按22:00算。';
+  $('clock-out').disabled = working;
   const history = status.history || {};
   $('history-sync').disabled = working || history.busy || !status.jira?.configured;
   $('history-status').textContent = history.busy ? '正在同步：' + history.progress : history.notice || (history.syncedAt ? `${history.from} 至 ${history.to} · ${history.count} 条记录 · 最近同步 ${time(history.syncedAt,true)}` : '尚未加载。配置 Jira 后会自动载入，也可以点击同步。');
@@ -230,6 +239,7 @@ const genius = initGenius({request,feedback,openPage});
 refresh(); setInterval(refresh,5000);
 
 $('codex-login').addEventListener('click', () => action('/api/codex/login'));
+$('clock-out').addEventListener('click', () => action('/api/work/clock-out'));
 $('codex-device-login').addEventListener('click', () => action('/api/codex/login', { method: 'device' }));
 $('codex-network').addEventListener('submit', event => { event.preventDefault(); void action('/api/codex/network', { proxyUrl: $('codex-proxy').value.trim() }); });
 $('codex-check').addEventListener('click', () => action('/api/codex/check'));

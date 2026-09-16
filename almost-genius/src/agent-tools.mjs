@@ -23,7 +23,8 @@ export const TOOL_DEFINITIONS = [
   definition('profile_set', '仅按用户明确要求更新个人背景，保留未被修改的内容。', { content: str, revision: num }, ['content', 'revision']),
   definition('history_query', '查找已保存的原始工作记录，可用于成长提炼、日报或周报。返回真实来源编号。日期为 YYYY-MM-DD；最多50条，offset 翻页。', { from: str, to: str, query: str, offset: num }),
   definition('jira_search', '检查本人未完成且今天到指定天数内到期的 Jira 任务。', { dueDays: num }),
-  definition('report_status', '读取今天完成标记、已有草稿和原始记录。'),
+  definition('report_status', '读取今天完成标记、已有草稿、原始记录和自动计算的工时参考。hours 区分正常下班基础工时、按当前时间下班的估算和已保存的实际安排。'),
+  definition('report_hours', '计算或保存 Jira 日报工时。date 为工作归属日期 YYYY-MM-DD，省略为今天；endTime 是24小时制下班时间。周一至五基础7小时，18:00后累加；周六基础5小时，16:00后累加，按实际分钟。周日必须 mode=interval，提供 startTime、endTime、breakMinutes（无休息填0）；提前下班或特殊安排也可明确选择 interval。跨午夜 nextDay=true，仍按工作日期规则。save=true 只在用户明确提供实际下班安排或要求保存时使用；假设、举例、查询一律 save=false。保存只是本机填报参考，不代表 Jira 已填报。', { date: str, mode: { type: 'string', enum: ['schedule', 'interval'] }, startTime: str, endTime: str, breakMinutes: num, nextDay: { type: 'boolean' }, save: { type: 'boolean' } }, ['endTime']),
   definition('report_complete', '仅在用户明确说已填报或撤销完成时修改完成标记。', { completed: { type: 'boolean' } }, ['completed']),
   definition('report_remind', '修改今天这一次日报提醒，time 为 HH:mm；null 取消改期。永久时间修改请用 tasks_change。', { time: { type: ['string', 'null'] } }, ['time']),
   definition('report_save', '把用户原始内容和核对后的日报/周报草稿分别保存。日报 summary 不超过50字。不会自动完成填报。', { kind: { type: 'string', enum: ['daily', 'weekly'] }, original: str, summary: str }, ['kind', 'original', 'summary']),
@@ -62,7 +63,12 @@ export class ToolService {
         return { total: all.length, entries: all.slice(a.offset || 0, (a.offset || 0) + 50) };
       }
       case 'jira_search': return this.jira.upcoming(beijing().date, a.dueDays ?? 2);
-      case 'report_status': { const w = this.work.status(); return { date: w.date, today: w.today, enabled: w.enabled }; }
+      case 'report_status': { const w = this.work.status(); return { date: w.date, today: w.today, hours: w.hours, enabled: w.enabled }; }
+      case 'report_hours': {
+        if (a.save !== undefined && typeof a.save !== 'boolean') throw new WorkError('保存选项无效。');
+        const { save, ...input } = a;
+        return save === true ? this.work.saveHours(input) : this.work.previewHours(input);
+      }
       case 'report_complete': if (typeof a.completed !== 'boolean') throw new WorkError('完成标记无效。'); return this.work.complete(a.completed);
       case 'report_remind': return this.work.setReminder(a.time);
       case 'report_save': {

@@ -48,6 +48,7 @@
         <article class="metric"><span class="label">临期任务</span><strong><span id="due-count">—</span><small> 项</small></strong><span id="due-caption">等待检查</span></article>
         <article class="metric"><span class="label">今日工作记录</span><strong><span id="note-count">0</span><small> 条</small></strong><button class="quiet-link" data-open="records">记录今天的工作 →</button></article>
       </div>
+      <article class="card work-hours-card"><div><span class="eyebrow" id="hours-label">日报工时</span><h2 id="hours-total">读取中…</h2><p class="hint" id="hours-calculation"></p><p class="hint" id="hours-help">说“下班了”即可按当前时间计算，也可以告诉我具体下班时间。</p></div><button class="secondary" id="clock-out">我下班了</button></article>
       <div class="two-columns">
         <article class="card due-card"><div class="card-heading"><h2>临期任务</h2><button class="icon-button" id="jira-check" title="立即检查临期任务" aria-label="立即检查临期任务"><svg><use href="#i-refresh"/></svg></button></div><p class="hint" id="jira-check-time">检查所有分配给你的未完成任务</p><div id="jira-issues" class="issue-list"></div></article>
         <article class="card"><div class="card-heading"><h2>提醒安排</h2><span class="pill" id="schedule-pill">读取中</span></div>
@@ -66,7 +67,7 @@
           <form id="note-form"><label for="note" id="note-label">今天做了什么？</label><textarea id="note" maxlength="4000" rows="7" required placeholder="例如：修复串口超时问题，完成设备联调，核对现场日志。"></textarea><div class="form-foot"><span class="hint" id="note-hint">整理为 50 字以内，生成文字后仍需自行填报。</span><button class="primary" id="record">保存并整理</button></div></form>
           <div class="writer-state" id="writer-status" role="status"></div><button class="text-button" id="retry" hidden>重新整理</button>
         </article>
-        <article class="card result-card"><div class="card-heading"><h2 id="result-title">填报参考</h2><span class="pill" id="result-count">≤ 50 字</span></div><div class="result-text" id="result-text">整理结果会显示在这里。</div><p class="hint" id="result-hint">也可以直接在企业微信发送工作内容。</p></article>
+        <article class="card result-card"><div class="card-heading"><h2 id="result-title">填报参考</h2><span class="pill" id="result-count">≤ 50 字</span></div><div class="result-text" id="result-text">整理结果会显示在这里。</div><p class="report-hours" id="result-hours"></p><p class="hint" id="result-hint">也可以直接在企业微信发送工作内容。</p></article>
       </div>
       <article class="card"><div class="card-heading"><h2>当前对话</h2><span class="hint" id="conversation-hint">记录全部保留，每次回答使用最近对话和当前草稿。</span></div><div id="conversation" class="notes-list"></div></article>
       <article class="card"><div class="card-heading"><h2>今日原始记录</h2><span class="hint" id="record-date"></span></div><div id="notes" class="notes-list"></div></article>

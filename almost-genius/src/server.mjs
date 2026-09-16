@@ -76,7 +76,7 @@ export function createSetupServer(setup, template, services = {}) {
     if (req.method === 'GET' && req.url === '/api/archive/export' && services.archive) return send(res, 200, services.archive.export());
     if (req.method === 'GET' && req.url === '/api/chat' && services.assistant) return send(res, 200, services.assistant.status());
     if (req.method === 'GET' && req.url === '/api/history' && services.history) return send(res,200,{entries:services.history.list()});
-    if (req.method !== 'POST' || !['/api/tasks/create', '/api/tasks/change', '/api/tasks/undo', '/api/archive/create', '/api/archive/change', '/api/archive/profile', '/api/archive/extract', '/api/chat/send', '/api/chat/retry', '/api/history/sync', '/api/codex/login', '/api/codex/check', '/api/codex/cancel', '/api/codex/network', '/api/backup/export', '/api/backup/import', '/api/app/restart', '/api/app/stop', '/api/connect', '/api/test-push', '/api/jira/connect', '/api/jira/check', '/api/work/complete', '/api/work/reopen', '/api/work/record', '/api/work/reminder', '/api/work/retry', '/api/work/enable', '/api/work/test-local'].includes(req.url)) {
+    if (req.method !== 'POST' || !['/api/tasks/create', '/api/tasks/change', '/api/tasks/undo', '/api/archive/create', '/api/archive/change', '/api/archive/profile', '/api/archive/extract', '/api/chat/send', '/api/chat/retry', '/api/history/sync', '/api/codex/login', '/api/codex/check', '/api/codex/cancel', '/api/codex/network', '/api/backup/export', '/api/backup/import', '/api/app/restart', '/api/app/stop', '/api/connect', '/api/test-push', '/api/jira/connect', '/api/jira/check', '/api/work/complete', '/api/work/reopen', '/api/work/record', '/api/work/clock-out', '/api/work/reminder', '/api/work/retry', '/api/work/enable', '/api/work/test-local'].includes(req.url)) {
       return send(res, 404, { error: '操作不存在。' });
     }
     if (mutationActive) return send(res, 409, { error: '正在处理，请稍后。' });
@@ -123,6 +123,7 @@ export function createSetupServer(setup, template, services = {}) {
           '/api/work/complete': () => work.complete(),
           '/api/work/reopen': () => work.complete(false),
           '/api/work/record': () => work.record(body.text, body.kind),
+          '/api/work/clock-out': () => work.clockOut(),
           '/api/work/reminder': () => work.setReminder(body.time),
           '/api/work/retry': () => work.retry(),
           '/api/work/enable': () => work.enable(body.enabled),
@@ -183,7 +184,7 @@ async function main() {
   const work = new WorkService({ store, writer, wecom: setup, scheduler, notify: notifyLocal });
   const toolService = new ToolService({ store, tasks, archive, jira, work });
   const gateway = new ToolGateway(toolService); await gateway.start();
-  const assistant = new AssistantService({ store, writer, gateway, archive, wecom: setup }); await assistant.initialize();
+  const assistant = new AssistantService({ store, writer, gateway, archive, wecom: setup, work }); await assistant.initialize();
   scheduler.assistant = assistant;
   toolService.maintenance = assistant.maintenance = work.maintenance = scheduler.maintenance = history.maintenance = () => backup.pending || backup.importing;
   setup.onText = async (text, messageId) => {

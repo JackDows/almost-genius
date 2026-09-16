@@ -3,6 +3,7 @@ import { beijing, dayRecord, weekStart } from './dates.mjs';
 import { weeklyPrompt } from './scheduler.mjs';
 import { activitiesInRange } from './history.mjs';
 import { reminderCommand } from './reminder-time.mjs';
+import { calculateWorkHours, workHoursReference, hoursReferenceText, clockOutInput } from './work-hours.mjs';
 
 export class WorkError extends Error {}
 export class WorkService {
@@ -16,7 +17,7 @@ export class WorkService {
   status() {
     const state = this.store.snapshot(); const { date } = beijing(this.now());
     const today = state.days[date] || { completed: false, notes: [], summary: '', sent: {} };
-    return { date, enabled: state.enabled, today, mode: state.mode?.date === date ? state.mode.kind : 'daily', busy: this.processing, writerNotice: this.writer.notice,
+    return { date, enabled: state.enabled, today, hours: workHoursReference(this.now(), state.days), mode: state.mode?.date === date ? state.mode.kind : 'daily', busy: this.processing, writerNotice: this.writer.notice,
       lastTickAt: this.scheduler.lastTickAt, network: this.scheduler.network, notice: this.scheduler.lastError };
   }
 
@@ -24,6 +25,27 @@ export class WorkService {
     const now = this.now(); const { date } = beijing(now);
     await this.store.update(state => { const day = dayRecord(state, date); day.completed = completed; day.completedAt = completed ? now.toISOString() : null; if (completed) delete day.reminder; });
     return completed ? '已记录今日填报完成，今晚不再提醒填报。' : '已取消今日完成标记。';
+  }
+
+  previewHours(input) {
+    try { return calculateWorkHours({ ...input, date: input?.date ?? beijing(this.now()).date }); }
+    catch (error) { throw new WorkError(error.message); }
+  }
+
+  async saveHours(input) {
+    if (this.maintenance?.()) throw new WorkError('正在导入备份，请稍后再保存工时。');
+    const record = { ...this.previewHours(input), updatedAt: this.now().toISOString() };
+    await this.store.update(state => { dayRecord(state, record.date).workHours = record; });
+    return { ...record, message: `${record.date} 工时已保存：${record.display}（Jira：${record.jiraDuration}）。` };
+  }
+
+  async clockOut(at = this.now()) {
+    const input = clockOutInput(at);
+    if (new Date(input.date + 'T00:00:00Z').getUTCDay() === 0) return '这次属于周日工作。你几点上班、几点下班，休息了多久？我按“整个时段减休息”直接算。';
+    try {
+      const result = await this.saveHours(input);
+      return `${input.date} ${input.nextDay ? '次日 ' : ''}${input.endTime} 下班：${result.calculation}。\nJira 日报工时：${result.jiraDuration}，已记在本机日报里。`;
+    } catch (error) { if (error instanceof WorkError) return error.message; throw error; }
   }
 
   async enable(enabled) {
@@ -62,7 +84,7 @@ export class WorkService {
       day.conversations[kind].push({ role: 'user', text: text.trim(), at: now.toISOString() });
       state.mode = { date, kind };
       day.jobs ||= {};
-      day.jobs[kind] = { id: randomUUID(), status: 'pending', origin };
+      day.jobs[kind] = { id: randomUUID(), status: 'pending', origin, at: now.toISOString() };
     });
     void this.processJobs().catch(() => { this.scheduler.lastError = '本地记录处理失败，请检查磁盘空间。'; });
     return kind === 'chat' ? '已收到，正在回答。' : '已记录，正在整理。';
@@ -148,7 +170,7 @@ export class WorkService {
             current.conversations[kind].push({ role: 'assistant', text, at: this.now().toISOString() });
             if (job.origin === 'wecom') {
               current.outbox ||= {};
-              current.outbox[kind] = { id: job.id, text: kind === 'daily' ? `填报参考：${text}` : kind === 'weekly' ? `核对草稿：\n${text}` : text, sent: false };
+              current.outbox[kind] = { id: job.id, text: kind === 'daily' ? `填报参考：${text}\n${hoursReferenceText(workHoursReference(new Date(job.at || this.now()), next.days))}` : kind === 'weekly' ? `核对草稿：\n${text}` : text, sent: false };
             }
           });
         } catch {

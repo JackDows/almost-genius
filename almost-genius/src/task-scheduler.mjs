@@ -1,6 +1,7 @@
 import { beijing, dayRecord, addDays } from './dates.mjs';
 import { occurrence, runId } from './tasks.mjs';
 import { weeklyPrompt } from './scheduler.mjs';
+import { workHoursReference, hoursReferenceText } from './work-hours.mjs';
 
 export function dueText(issues, date) {
   const escape = v => String(v).replace(/[\[\]()*_`<>\\\r\n]/g, ' ');
@@ -73,7 +74,10 @@ export class TaskScheduler {
               await this.store.update(s => { dayRecord(s, date).jira = { checkedAt: this.now().toISOString(), issues, scope: `today+${task.dueDays}` }; });
               text = dueText(issues, date);
             } else if (task.action === 'weekly') text = weeklyPrompt(this.store.snapshot(), date);
-            else if (task.action === 'report') text = slot.customId ? '到约定的填报时间了，今天做了什么？已填好请回复“已填报”。' : '今天做了什么？我帮你整理50字以内的填报内容。已填好请回复“已填报”。';
+            else if (task.action === 'report') {
+              text = slot.customId ? '到约定的填报时间了，今天做了什么？已填好请回复“已填报”。' : '今天做了什么？我帮你整理50字以内的填报内容。已填好请回复“已填报”。';
+              text += '\n' + hoursReferenceText(workHoursReference(this.now(), this.store.snapshot().days));
+            }
             else text = task.instructions;
             await this.set(id, { text, status: text ? 'ready' : 'skipped', error: null, startedAt: this.store.snapshot().taskRuns[id].startedAt || this.now().toISOString() });
             if (!text) continue;
