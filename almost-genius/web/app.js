@@ -104,10 +104,12 @@ function render() {
   $('history-status').textContent = history.busy ? '正在同步：' + history.progress : history.notice || (history.syncedAt ? `${history.from} 至 ${history.to} · ${history.count} 条记录 · 最近同步 ${time(history.syncedAt,true)}` : '尚未加载。配置 Jira 后会自动载入，也可以点击同步。');
   if (!$('page-history').hidden && history.syncedAt !== historyStamp) void loadHistory();
   $('welcome').hidden = Boolean(status.hasCredentials || status.jira?.configured);
-  $('codex-state').textContent = {logged_in:'已登录', logged_out:'未登录', logging_in:'登录中', missing:'组件缺失', checking:'检查中'}[status.codex?.state] || '待检查';
+  $('codex-state').textContent = {logged_in:'已登录', logged_out:'未登录', logging_in:'登录中', error:'登录异常', missing:'组件缺失', checking:'检查中'}[status.codex?.state] || '待检查';
   $('codex-message').textContent = status.codex?.message || '';
-  $('codex-login').disabled = working || status.codex?.state === 'logging_in';
+  $('codex-login').disabled = working || ['logging_in', 'checking', 'logged_in'].includes(status.codex?.state);
   $('codex-cancel').hidden = status.codex?.state !== 'logging_in';
+  $('codex-device').hidden = status.codex?.state !== 'logging_in' || !status.codex?.userCode;
+  $('codex-device-code').textContent = status.codex?.userCode || '';
   if (status.backupPending) $('backup-state').textContent = '备份已验证，后台正在重新启动。';
   const runtime = runtimeView(status);
   $('runtime-text').textContent = runtime.text; $('runtime-dot').className = 'dot ' + runtime.color;
