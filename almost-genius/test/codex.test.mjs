@@ -224,3 +224,21 @@ test('等待回调端口检查时取消，不会在检查结束后启动登录',
   const pending = auth.login(); auth.cancel(); release(); await pending;
   assert.equal(starts, 0); assert.equal(auth.status().state, 'logged_out');
 });
+
+test('网页登录进程退出后即核对凭据，不等待浏览器继承的管道关闭', async t => {
+  const f = await fixture(t, (child, args) => {
+    if (args.includes('status')) { child.stderr.write('Logged in using ChatGPT'); child.emit('close', 0); }
+  });
+  const auth = new CodexAuth({ runtime: f.runtime, checkPort: async () => {}, loginTimeoutMs: 100 });
+  t.after(() => auth.cancel());
+  await auth.login();
+  const loginChild = f.calls[0].child;
+  loginChild.emit('exit', 0);
+  await until(() => auth.status().state === 'logged_in');
+  assert.equal(loginChild.stdout.destroyed, false);
+  assert.equal(loginChild.stderr.destroyed, false);
+  assert.equal(f.calls.length, 2);
+  loginChild.stderr.write('late browser output'); loginChild.emit('close', 0);
+  await new Promise(resolve => setTimeout(resolve, 120));
+  assert.equal(auth.status().state, 'logged_in'); assert.equal(f.calls.length, 2);
+});

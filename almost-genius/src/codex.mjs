@@ -168,7 +168,10 @@ export class CodexAuth {
         const userCode = text.match(/\b[A-Z0-9]{4,6}-[A-Z0-9]{4,6}\b/)?.[0];
         if (verificationUrl && userCode) this.value = { state: 'logging_in', method, message: '打开官方验证页，输入下方一次性验证码。请在五分钟内完成。', verificationUrl, userCode, expiresAt };
       });
-      child.once('error', () => finish(-1)); child.once('close', code => finish(code));
+      // Windows 启动的浏览器可能继续持有输出管道，close 会晚于 CLI 退出。
+      // 登录是否完成以登录进程的 exit 为准，之后独立核对凭据。
+      child.once('error', () => finish(-1));
+      child.once('exit', code => finish(code)); child.once('close', code => finish(code));
       return method === 'device' ? '已发起独立登录，请等待验证码后打开官方验证页。' : '已发起独立网页登录，请在浏览器中完成。';
     } catch {
       if (this.operation === operation) { this.operation = null; this.child = null; this.value = { state: 'error', message: '无法启动本应用的 Codex 登录，请检查组件和数据目录权限。' }; }

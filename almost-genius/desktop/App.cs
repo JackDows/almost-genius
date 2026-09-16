@@ -239,9 +239,9 @@ internal sealed class ReminderContext : ApplicationContext
 internal sealed class ReminderWindow : Form
 {
     private readonly ServiceClient service;
-    private readonly WebView2 web = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = Color.FromArgb(247, 248, 245) };
+    private WebView2 web;
     private readonly Label loading = new Label { Text = "正在打开工作台…", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Microsoft YaHei UI", 13) };
-    private bool initializing, loaded;
+    private bool initializing, loaded, recreateWebView;
     internal bool AllowClose;
 
     internal ReminderWindow(ServiceClient service, Icon icon)
@@ -252,7 +252,7 @@ internal sealed class ReminderWindow : Form
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Color.FromArgb(247, 248, 245);
-        Controls.Add(web); Controls.Add(loading);
+        Controls.Add(loading);
         Shown += async (sender, e) => await EnsurePage();
         FormClosing += (sender, e) => { if (!AllowClose && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); } };
     }
@@ -263,9 +263,18 @@ internal sealed class ReminderWindow : Form
         initializing = true;
         try
         {
-            await service.Request("api/status");
+            try { await service.Request("api/status"); }
+            catch (Exception error)
+            {
+                RecordFailure("service", error);
+                loading.Text = "后台暂时未连接，正在重试…";
+                loading.Visible = true;
+                return;
+            }
+            if (recreateWebView || web == null || web.IsDisposed) ResetWebView();
             if (web.CoreWebView2 == null)
             {
+                var current = web;
                 var environment = await CoreWebView2Environment.CreateAsync(null, Path.Combine(Program.Data, "webview"));
                 await web.EnsureCoreWebView2Async(environment);
                 web.CoreWebView2.Settings.AreDevToolsEnabled = false;
@@ -294,16 +303,55 @@ internal sealed class ReminderWindow : Form
                 };
                 web.CoreWebView2.NavigationCompleted += (sender, e) =>
                 {
+                    if (current != web || IsDisposed || e.WebErrorStatus == CoreWebView2WebErrorStatus.OperationCanceled) return;
                     loaded = e.IsSuccess;
                     loading.Visible = !loaded;
-                    if (!loaded) loading.Text = "后台正在恢复，请稍候…";
+                    if (!loaded) { loading.Text = "工作台页面暂时无法加载，正在重试…"; RecordFailure("navigation-" + e.WebErrorStatus, null); }
+                    else RecordFailure("navigation-ready", null);
                 };
-                web.CoreWebView2.ProcessFailed += (sender, e) => { loaded = false; loading.Visible = true; };
+                web.CoreWebView2.ProcessFailed += (sender, e) =>
+                {
+                    if (current != web || IsDisposed) return;
+                    if (e.ProcessFailedKind != CoreWebView2ProcessFailedKind.BrowserProcessExited &&
+                        e.ProcessFailedKind != CoreWebView2ProcessFailedKind.RenderProcessExited &&
+                        e.ProcessFailedKind != CoreWebView2ProcessFailedKind.RenderProcessUnresponsive) return;
+                    RecordFailure("webview-" + e.ProcessFailedKind, null);
+                    loaded = false; recreateWebView = true;
+                    loading.Text = "界面组件已中断，正在重新创建…"; loading.Visible = true; loading.BringToFront();
+                };
             }
             web.CoreWebView2.Navigate(Program.Home);
         }
-        catch { loading.Text = "后台正在启动或恢复，请稍候…"; }
+        catch (Exception error)
+        {
+            RecordFailure("webview-initialize", error);
+            loaded = false; recreateWebView = true;
+            loading.Text = "界面组件暂时无法启动，正在重新创建…";
+            loading.Visible = true; loading.BringToFront();
+        }
         finally { initializing = false; }
+    }
+
+    private void ResetWebView()
+    {
+        var previous = web; web = null;
+        if (previous != null) { Controls.Remove(previous); previous.Dispose(); }
+        web = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = BackColor };
+        Controls.Add(web); loading.BringToFront();
+        recreateWebView = false; loaded = false;
+    }
+
+    private static void RecordFailure(string stage, Exception error)
+    {
+        // 只记录阶段、异常类型和错误码，不记录 URL、凭据或页面内容。
+        try
+        {
+            var filename = Path.Combine(Program.Data, "desktop-errors.log");
+            if (File.Exists(filename) && new FileInfo(filename).Length > 131072) File.WriteAllText(filename, "");
+            File.AppendAllText(filename, DateTime.UtcNow.ToString("o") + " " + stage +
+                (error == null ? "" : " " + error.GetType().Name + " 0x" + error.HResult.ToString("X8")) + Environment.NewLine);
+        }
+        catch { }
     }
 
     private static void OpenLink(string value)
