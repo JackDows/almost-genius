@@ -6,6 +6,7 @@
 
 - [安装包与预览版本](https://github.com/JackDows/almost-genius/releases)
 - [安装、使用和开发说明](almost-genius/README.md)
+- [Logo 与头像原图](assets/README.md)
 - [本次范围与验收记录](docs/v0.4-preview-plan.md)
 - [开源借鉴与许可证](almost-genius/THIRD_PARTY.md)
 
